@@ -1,0 +1,183 @@
+name: Build Kernel - Moto G45 (fogos)
+
+on:
+  workflow_dispatch:
+    inputs:
+      BUILD_TYPE:
+        description: 'Build type'
+        required: true
+        default: 'new'
+        type: choice
+        options:
+          - 'new'
+          - 'rebuild'
+      CLEAR_CCACHE:
+        description: 'Clear ccache before building?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      MAKE_RELEASE:
+        description: 'Create a GitHub Release?'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+
+env:
+  KERNEL_REPO: prabhatkrmishra/kernel_motorola_fogos
+  KERNEL_BRANCH: 15.0
+  CLANG_REPO: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+  BUILD_TOOLS_REPO: https://android.googlesource.com/kernel/build
+
+jobs:
+  build:
+    name: fogos | MSM-5.4 | Blair | KernelSU
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            git bc bison flex zip unzip wget curl cpio kmod \
+            libssl-dev libelf-dev libncurses-dev libtinfo5 \
+            python3 python-is-python3 \
+            build-essential ccache lz4 zstd
+
+      - name: Create workspace structure
+        run: |
+          mkdir -p $GITHUB_WORKSPACE/kernel/msm-5.4
+          mkdir -p $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
+
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.KERNEL_REPO }}
+          ref: ${{ env.KERNEL_BRANCH }}
+          path: kernel/msm-5.4
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Clone Android kernel build tools
+        run: |
+          git clone ${{ env.BUILD_TOOLS_REPO }} \
+            --depth=1 --single-branch \
+            $GITHUB_WORKSPACE/build
+
+      - name: Restore cached AOSP Clang r547379
+        id: cache-clang
+        uses: actions/cache@v4
+        with:
+          path: prebuilts-master/clang/host/linux-x86/clang-r547379
+          key: aosp-clang-r547379-linux-x86-v1
+
+      - name: Download AOSP Clang r547379
+        if: steps.cache-clang.outputs.cache-hit != 'true'
+        run: |
+          cd $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
+          git init
+          git remote add origin ${{ env.CLANG_REPO }}
+          git config core.sparseCheckout true
+          echo "clang-r547379/" > .git/info/sparse-checkout
+          git pull --depth=1 origin main
+
+      - name: Configure ccache
+        run: |
+          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
+          ccache --max-size=10G
+          if [ "${{ github.event.inputs.CLEAR_CCACHE }}" = "true" ]; then
+            ccache -C
+          fi
+          ccache -z
+          ccache --set-config sloppiness=time_macros,include_file_mtime,include_file_ctime
+          ccache --set-config cpp2=true
+          ccache --set-config compilercheck=content
+
+      - name: Restore cached ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-fogos-${{ env.KERNEL_BRANCH }}-${{ github.sha }}
+          restore-keys: |
+            ccache-fogos-${{ env.KERNEL_BRANCH }}-
+            ccache-fogos-
+
+      - name: Build kernel
+        run: |
+          cp $GITHUB_WORKSPACE/kernel/msm-5.4/build_kernel.sh \
+             $GITHUB_WORKSPACE/build_kernel.sh
+          chmod +x $GITHUB_WORKSPACE/build_kernel.sh
+          cd $GITHUB_WORKSPACE
+          bash build_kernel.sh --${{ github.event.inputs.BUILD_TYPE }}
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s
+
+      - name: Verify output files
+        run: |
+          ls -lh \
+            $GITHUB_WORKSPACE/out/Image \
+            $GITHUB_WORKSPACE/out/Image.gz \
+            $GITHUB_WORKSPACE/out/blair-moto-fogos-base.dtb \
+            $GITHUB_WORKSPACE/out/blair-fogos-dvt1-overlay.dtbo \
+            $GITHUB_WORKSPACE/out/blair-fogos-evt-overlay.dtbo
+
+      - name: Create AnyKernel3 flashable zip
+        run: |
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          cp out/Image.gz AnyKernel3/
+          cd AnyKernel3
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/' anykernel.sh
+          sed -i 's/device.name1=/device.name1=fogos/' anykernel.sh
+          ZIP_NAME="fogos-KernelSU-msm5.4-R${{ github.run_number }}.zip"
+          zip -r9 $GITHUB_WORKSPACE/$ZIP_NAME . -x "*.git*" "*.github*"
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload kernel binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: fogos-kernel-binaries-R${{ github.run_number }}
+          path: |
+            out/Image
+            out/Image.gz
+            out/blair-moto-fogos-base.dtb
+            out/blair-fogos-dvt1-overlay.dtbo
+            out/blair-fogos-evt-overlay.dtbo
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload flashable zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: fogos-KernelSU-flashable-R${{ github.run_number }}
+          path: ${{ env.ZIP_NAME }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Create GitHub Release
+        if: ${{ github.event.inputs.MAKE_RELEASE == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: kernel-fogos-R${{ github.run_number }}
+          name: "fogos Kernel — KernelSU — Build #${{ github.run_number }}"
+          body: |
+            ## Motorola G45 (fogos) Custom Kernel
+            | Field | Value |
+            |---|---|
+            | **Device** | Motorola G45 (fogos) |
+            | **Chipset** | Qualcomm Blair (MSM-Holi msm-5.4) |
+            | **Branch** | 15.0 |
+            | **Root** | KernelSU + susfs |
+            | **Toolchain** | AOSP Clang r547379 (v20.0.0) |
+          files: ${{ env.ZIP_NAME }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GIT
