@@ -162,22 +162,14 @@ jobs:
           retention-days: 14
 
       - name: Create GitHub Release
-        if: ${{ github.event.inputs.MAKE_RELEASE == 'true' }}
+        if: github.event.inputs.MAKE_RELEASE == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: kernel-fogos-R${{ github.run_number }}
-          name: "fogos Kernel — KernelSU — Build #${{ github.run_number }}"
-          body: |
-            ## Motorola G45 (fogos) Custom Kernel
-            | Field | Value |
-            |---|---|
-            | **Device** | Motorola G45 (fogos) |
-            | **Chipset** | Qualcomm Blair (MSM-Holi msm-5.4) |
-            | **Branch** | 15.0 |
-            | **Root** | KernelSU + susfs |
-            | **Toolchain** | AOSP Clang r547379 (v20.0.0) |
+          name: fogos Kernel KernelSU Build ${{ github.run_number }}
+          body: "Motorola G45 fogos | Qualcomm Blair MSM-5.4 | KernelSU + susfs | AOSP Clang r547379 | Only for stock/vendor ROM."
           files: ${{ env.ZIP_NAME }}
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GIT
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
