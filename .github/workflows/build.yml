@@ -1,0 +1,46 @@
+name: Build Fogos Kernel
+
+on:
+  push:
+    branches:
+      - 15.0
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Install deps
+      run: |
+        sudo apt update
+        sudo apt install -y bc bison build-essential flex curl zip \
+        libssl-dev libelf-dev git python3 clang lld
+
+    - name: Clone Clang
+      run: |
+        git clone https://github.com/kdrag0n/proton-clang --depth=1 clang
+
+    - name: Setup env
+      run: |
+        echo "ARCH=arm64" >> $GITHUB_ENV
+        echo "SUBARCH=arm64" >> $GITHUB_ENV
+        echo "PATH=$(pwd)/clang/bin:$PATH" >> $GITHUB_ENV
+
+    - name: Build kernel
+      run: |
+        mkdir out
+        make O=out ARCH=arm64 fogos_stock_config
+        make -j$(nproc) O=out \
+        ARCH=arm64 \
+        CC=clang \
+        CLANG_TRIPLE=aarch64-linux-gnu-
+
+    - name: Upload
+      uses: actions/upload-artifact@v3
+      with:
+        name: kernel
+        path: out/arch/arm64/boot/
