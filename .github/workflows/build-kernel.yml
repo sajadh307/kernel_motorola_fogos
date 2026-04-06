@@ -24,6 +24,7 @@ env:
   KERNEL_REPO: prabhatkrmishra/kernel_motorola_fogos
   KERNEL_BRANCH: "15.0"
   CLANG_REPO: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
+  BUILD_TOOLS_REPO: https://android.googlesource.com/kernel/build
 
 jobs:
   build:
@@ -45,7 +46,6 @@ jobs:
         run: |
           mkdir -p $GITHUB_WORKSPACE/kernel/msm-5.4
           mkdir -p $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
-          mkdir -p $GITHUB_WORKSPACE/build
 
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -61,17 +61,21 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build
-          key: android-kernel-build-tools-v2
+          key: android-kernel-build-tools-v1
 
-      - name: Download Android kernel build tools via tarball
+      - name: Clone Android kernel build tools
         if: steps.cache-build-tools.outputs.cache-hit != 'true'
         run: |
-          curl -sL \
-            "https://android.googlesource.com/kernel/build/+archive/refs/heads/main.tar.gz" \
-            -o /tmp/build-tools.tar.gz
-          tar xzf /tmp/build-tools.tar.gz -C $GITHUB_WORKSPACE/build/
-          echo "Build tools extracted:"
-          ls $GITHUB_WORKSPACE/build/
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i..."
+            rm -rf $GITHUB_WORKSPACE/build
+            git clone ${{ env.BUILD_TOOLS_REPO }} \
+              --depth=1 --single-branch \
+              $GITHUB_WORKSPACE/build && break
+            echo "Failed, waiting 60s before retry..."
+            sleep 60
+          done
+          test -d $GITHUB_WORKSPACE/build || exit 1
 
       - name: Restore cached AOSP Clang r547379
         id: cache-clang
@@ -84,19 +88,16 @@ jobs:
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           cd $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
-          git init
-          git remote add origin ${{ env.CLANG_REPO }}
-          git config core.sparseCheckout true
-          echo "clang-r547379/" > .git/info/sparse-checkout
-          for i in 1 2 3; do
-            git pull --depth=1 origin main && break
-            echo "Retry $i failed, waiting 30s..."
-            rm -rf .git
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i..."
             git init
             git remote add origin ${{ env.CLANG_REPO }}
             git config core.sparseCheckout true
             echo "clang-r547379/" > .git/info/sparse-checkout
-            sleep 30
+            git pull --depth=1 origin main && break
+            echo "Failed, waiting 60s before retry..."
+            rm -rf .git
+            sleep 60
           done
           test -d clang-r547379 || exit 1
 
