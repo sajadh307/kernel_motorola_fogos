@@ -19,14 +19,6 @@ on:
         options:
           - 'false'
           - 'true'
-      MAKE_RELEASE:
-        description: 'Create a GitHub Release?'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
 
 env:
   KERNEL_REPO: prabhatkrmishra/kernel_motorola_fogos
@@ -103,10 +95,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.ccache
-          key: ccache-fogos-${{ env.KERNEL_BRANCH }}-${{ github.sha }}
-          restore-keys: |
-            ccache-fogos-${{ env.KERNEL_BRANCH }}-
-            ccache-fogos-
+          key: ccache-fogos-${{ github.sha }}
+          restore-keys: ccache-fogos-
 
       - name: Build kernel
         run: |
@@ -136,9 +126,8 @@ jobs:
           cd AnyKernel3
           sed -i 's/do.devicecheck=1/do.devicecheck=0/' anykernel.sh
           sed -i 's/device.name1=/device.name1=fogos/' anykernel.sh
-          ZIP_NAME="fogos-KernelSU-msm5.4-R${{ github.run_number }}.zip"
-          zip -r9 $GITHUB_WORKSPACE/$ZIP_NAME . -x "*.git*" "*.github*"
-          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+          zip -r9 $GITHUB_WORKSPACE/fogos-KernelSU-R${GITHUB_RUN_NUMBER}.zip . -x "*.git*"
+          echo "ZIP_NAME=fogos-KernelSU-R${GITHUB_RUN_NUMBER}.zip" >> $GITHUB_ENV
 
       - name: Upload kernel binaries
         uses: actions/upload-artifact@v4
@@ -160,16 +149,3 @@ jobs:
           path: ${{ env.ZIP_NAME }}
           if-no-files-found: error
           retention-days: 14
-
-      - name: Create GitHub Release
-        if: github.event.inputs.MAKE_RELEASE == 'true'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: kernel-fogos-R${{ github.run_number }}
-          name: fogos Kernel KernelSU Build ${{ github.run_number }}
-          body: "Motorola G45 fogos | Qualcomm Blair MSM-5.4 | KernelSU + susfs | AOSP Clang r547379 | Only for stock/vendor ROM."
-          files: ${{ env.ZIP_NAME }}
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN
