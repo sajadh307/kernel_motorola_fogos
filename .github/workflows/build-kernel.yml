@@ -30,7 +30,7 @@ on:
 
 env:
   KERNEL_REPO: prabhatkrmishra/kernel_motorola_fogos
-  KERNEL_BRANCH: 15.0
+  KERNEL_BRANCH: "15.0"
   CLANG_REPO: https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86
   BUILD_TOOLS_REPO: https://android.googlesource.com/kernel/build
 
@@ -172,4 +172,4 @@ jobs:
           draft: false
           prerelease: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN
