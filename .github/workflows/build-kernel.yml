@@ -56,11 +56,26 @@ jobs:
           submodules: recursive
           fetch-depth: 1
 
+      - name: Restore cached Android build tools
+        id: cache-build-tools
+        uses: actions/cache@v4
+        with:
+          path: build
+          key: android-kernel-build-tools-v1
+
       - name: Clone Android kernel build tools
+        if: steps.cache-build-tools.outputs.cache-hit != 'true'
         run: |
-          git clone ${{ env.BUILD_TOOLS_REPO }} \
-            --depth=1 --single-branch \
-            $GITHUB_WORKSPACE/build
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i..."
+            rm -rf $GITHUB_WORKSPACE/build
+            git clone ${{ env.BUILD_TOOLS_REPO }} \
+              --depth=1 --single-branch \
+              $GITHUB_WORKSPACE/build && break
+            echo "Failed, waiting 60s before retry..."
+            sleep 60
+          done
+          test -d $GITHUB_WORKSPACE/build || exit 1
 
       - name: Restore cached AOSP Clang r547379
         id: cache-clang
@@ -73,11 +88,18 @@ jobs:
         if: steps.cache-clang.outputs.cache-hit != 'true'
         run: |
           cd $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
-          git init
-          git remote add origin ${{ env.CLANG_REPO }}
-          git config core.sparseCheckout true
-          echo "clang-r547379/" > .git/info/sparse-checkout
-          git pull --depth=1 origin main
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i..."
+            git init
+            git remote add origin ${{ env.CLANG_REPO }}
+            git config core.sparseCheckout true
+            echo "clang-r547379/" > .git/info/sparse-checkout
+            git pull --depth=1 origin main && break
+            echo "Failed, waiting 60s before retry..."
+            rm -rf .git
+            sleep 60
+          done
+          test -d clang-r547379 || exit 1
 
       - name: Configure ccache
         run: |
