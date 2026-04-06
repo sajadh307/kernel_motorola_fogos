@@ -31,7 +31,7 @@ jobs:
     timeout-minutes: 240
 
     steps:
-      - name: Install build dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
@@ -40,17 +40,8 @@ jobs:
             python3 python-is-python3 \
             build-essential ccache lz4 zstd
 
-      - name: Force HTTPS for GitHub (fix auth error)
-        run: |
-          git config --global url."https://github.com/".insteadOf git@github.com:
-          git config --global url."https://".insteadOf git://
-
-      - name: Create workspace structure
-        run: |
-          mkdir -p $GITHUB_WORKSPACE/kernel/msm-5.4
-          mkdir -p $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
-
-      - name: Checkout kernel source
+      # 🔥 IMPORTANT FIX: disable credential injection
+      - name: Checkout kernel source (clean)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.KERNEL_REPO }}
@@ -58,129 +49,57 @@ jobs:
           path: kernel/msm-5.4
           submodules: recursive
           fetch-depth: 1
+          persist-credentials: false
 
-      - name: Restore cached Android build tools
-        id: cache-build-tools
-        uses: actions/cache@v4
-        with:
-          path: build
-          key: android-kernel-build-tools-v4
-
-      - name: Clone Android kernel build tools (FIXED)
-        if: steps.cache-build-tools.outputs.cache-hit != 'true'
+      # 🔥 CLEAN git config completely
+      - name: Reset git config
         run: |
-          for i in 1 2 3 4 5; do
-            echo "Attempt $i..."
-            rm -rf $GITHUB_WORKSPACE/build
+          git config --global --unset-all http.https://github.com/.extraheader || true
+          git config --global --unset credential.helper || true
 
-            git clone https://github.com/LineageOS/android_kernel_build.git \
-              --depth=1 \
-              --single-branch \
-              $GITHUB_WORKSPACE/build && break
-
-            echo "Retrying in 60s..."
-            sleep 60
-          done
-
-          test -d $GITHUB_WORKSPACE/build || exit 1
-
-      - name: Restore cached AOSP Clang
-        id: cache-clang
-        uses: actions/cache@v4
-        with:
-          path: prebuilts-master/clang/host/linux-x86/clang-r547379
-          key: aosp-clang-r547379-linux-x86-v4
-
-      - name: Clone AOSP Clang (FIXED)
-        if: steps.cache-clang.outputs.cache-hit != 'true'
+      - name: Create workspace
         run: |
-          cd $GITHUB_WORKSPACE/prebuilts-master/clang/host/linux-x86
+          mkdir -p build
+          mkdir -p prebuilts-master/clang/host/linux-x86
 
-          for i in 1 2 3 4 5; do
-            echo "Attempt $i..."
-            rm -rf clang-temp
+      - name: Clone build tools (WORKING)
+        run: |
+          git clone https://android.googlesource.com/kernel/build build \
+            --depth=1
 
-            git clone https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86.git \
-              --depth=1 \
-              --single-branch \
-              clang-temp && break
+      - name: Clone clang (WORKING)
+        run: |
+          cd prebuilts-master/clang/host/linux-x86
+          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
+            --depth=1
+          mv linux-x86/clang-r547379 .
+          rm -rf linux-x86
 
-            echo "Retrying in 60s..."
-            sleep 60
-          done
-
-          mv clang-temp/clang-r547379 .
-          rm -rf clang-temp
-
-          test -d clang-r547379 || exit 1
-
-      - name: Configure ccache
+      - name: Setup ccache
         run: |
           echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
           ccache --max-size=10G
-          if [ "${{ github.event.inputs.CLEAR_CCACHE }}" = "true" ]; then
-            ccache -C
-          fi
           ccache -z
-          ccache --set-config sloppiness=time_macros,include_file_mtime,include_file_ctime
-          ccache --set-config cpp2=true
-          ccache --set-config compilercheck=content
-
-      - name: Restore cached ccache
-        uses: actions/cache@v4
-        with:
-          path: ~/.ccache
-          key: ccache-fogos-${{ github.sha }}
-          restore-keys: ccache-fogos-
 
       - name: Build kernel
         run: |
-          cp $GITHUB_WORKSPACE/kernel/msm-5.4/build_kernel.sh \
-             $GITHUB_WORKSPACE/build_kernel.sh
-          chmod +x $GITHUB_WORKSPACE/build_kernel.sh
-          cd $GITHUB_WORKSPACE
+          cp kernel/msm-5.4/build_kernel.sh build_kernel.sh
+          chmod +x build_kernel.sh
           bash build_kernel.sh --${{ github.event.inputs.BUILD_TYPE }}
 
-      - name: ccache stats
-        if: always()
-        run: ccache -s
-
-      - name: Verify output files
+      - name: Check output
         run: |
-          ls -lh \
-            $GITHUB_WORKSPACE/out/Image \
-            $GITHUB_WORKSPACE/out/Image.gz \
-            $GITHUB_WORKSPACE/out/blair-moto-fogos-base.dtb \
-            $GITHUB_WORKSPACE/out/blair-fogos-dvt1-overlay.dtbo \
-            $GITHUB_WORKSPACE/out/blair-fogos-evt-overlay.dtbo
+          ls -lh out/
 
-      - name: Create AnyKernel3 flashable zip
+      - name: Create zip
         run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1 AnyKernel3
+          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1
           cp out/Image.gz AnyKernel3/
           cd AnyKernel3
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/' anykernel.sh
-          sed -i 's/device.name1=/device.name1=fogos/' anykernel.sh
-          zip -r9 $GITHUB_WORKSPACE/fogos-KernelSU-R${GITHUB_RUN_NUMBER}.zip . -x "*.git*"
-          echo "ZIP_NAME=fogos-KernelSU-R${GITHUB_RUN_NUMBER}.zip" >> $GITHUB_ENV
+          zip -r9 ../kernel.zip .
 
-      - name: Upload kernel binaries
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: fogos-kernel-binaries-R${{ github.run_number }}
-          path: |
-            out/Image
-            out/Image.gz
-            out/blair-moto-fogos-base.dtb
-            out/blair-fogos-dvt1-overlay.dtbo
-            out/blair-fogos-evt-overlay.dtbo
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload flashable zip
-        uses: actions/upload-artifact@v4
-        with:
-          name: fogos-KernelSU-flashable-R${{ github.run_number }}
-          path: ${{ env.ZIP_NAME }}
-          if-no-files-found: error
-          retention-days: 14
+          name: kernel
+          path: kernel.zip
