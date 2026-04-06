@@ -11,40 +11,43 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Checkout source
-    - name: Checkout source
-      uses: actions/checkout@v3
+      - name: Checkout source
+        uses: actions/checkout@v3
 
-    # 2. Install dependencies
-    - name: Install dependencies
-      run: |
-        sudo apt update
-        sudo apt install -y \
-        bc bison build-essential flex curl zip \
-        libssl-dev libelf-dev git python3 \
-        clang lld ccache
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y bc bison build-essential flex curl zip \
+          libssl-dev libelf-dev git python3 clang lld
 
-    # 3. Setup ccache (faster builds)
-    - name: Setup ccache
-      run: |
-        echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-        echo "USE_CCACHE=1" >> $GITHUB_ENV
-        echo "CCACHE_COMPRESS=1" >> $GITHUB_ENV
-        ccache -M 5G
+      - name: Clone Proton Clang
+        run: |
+          git clone https://github.com/kdrag0n/proton-clang --depth=1 clang
 
-    # 4. Clone Proton Clang
-    - name: Clone Proton Clang
-      run: |
-        git clone https://github.com/kdrag0n/proton-clang --depth=1 clang
+      - name: Setup environment
+        run: |
+          echo "ARCH=arm64" >> $GITHUB_ENV
+          echo "SUBARCH=arm64" >> $GITHUB_ENV
+          echo "PATH=$(pwd)/clang/bin:$PATH" >> $GITHUB_ENV
 
-    # 5. Export environment
-    - name: Setup environment
-      run: |
-        echo "ARCH=arm64" >> $GITHUB_ENV
-        echo "SUBARCH=arm64" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_USER=sajad" >> $GITHUB_ENV
-        echo "KBUILD_BUILD_HOST=github" >> $GITHUB_ENV
-        echo "PATH=$(pwd)/clang/bin:$PATH" >> $GITHUB_ENV
+      - name: Prepare build
+        run: |
+          rm -rf out
+          mkdir out
 
-    # 6. Clean output
-    - name: Clean
+      - name: Load config
+        run: |
+          make O=out ARCH=arm64 fogos_stock_config
+
+      - name: Build kernel
+        run: |
+          make -j$(nproc) O=out \
+          ARCH=arm64 \
+          CC=clang \
+          CLANG_TRIPLE=aarch64-linux-gnu-
+
+      - name: Upload kernel
+        uses: actions/upload-artifact@v3
+        with:
+          name: kernel
+          path: out/arch/arm64/boot/
