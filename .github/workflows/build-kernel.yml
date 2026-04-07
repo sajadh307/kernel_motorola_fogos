@@ -23,8 +23,15 @@ jobs:
           sudo apt update
           sudo apt install -y git bc bison flex libssl-dev make libc6-dev \
             libncurses5-dev lld device-tree-compiler libelf-dev \
-            zlib1g-dev wget tar clang llvm \
-            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
+            zlib1g-dev wget tar python3 binutils-aarch64-linux-gnu \
+            gcc-aarch64-linux-gnu
+
+      - name: Download Android prebuilt Clang
+        run: |
+          mkdir -p clang
+          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz -O clang.tar.gz
+          tar -xf clang.tar.gz -C clang
+          echo "$PWD/clang/bin" >> $GITHUB_PATH
 
       - name: Set compiler env
         run: |
