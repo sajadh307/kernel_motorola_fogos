@@ -13,25 +13,30 @@ jobs:
       ARCH: arm64
       CROSS_COMPILE: aarch64-linux-gnu-
     steps:
+
       # 1️⃣ Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Install dependencies including ARM64 cross-compiler
+      # 2️⃣ Install build dependencies including ARM64 cross-compiler
       - name: Install build dependencies
         run: |
           sudo apt update
           sudo apt install -y git wget curl zip unzip python3 make clang gcc bc bison flex \
             libncurses-dev rsync libssl-dev crossbuild-essential-arm64
 
-      # 3️⃣ Move KernelSU folder to drivers/kernelsu
+      # 3️⃣ Move KernelSU folder safely
       - name: Move KernelSU folder
         run: |
-          # Remove any existing file/folder to avoid errors
-          if [ -e drivers/kernelsu ]; then
+          # Remove existing file or folder if present
+          if [ -f drivers/kernelsu ]; then
+            echo "drivers/kernelsu is a file, deleting..."
+            rm -f drivers/kernelsu
+          elif [ -d drivers/kernelsu ]; then
+            echo "drivers/kernelsu is a directory, deleting..."
             rm -rf drivers/kernelsu
           fi
-          # Move KernelSU to correct folder
+          # Move KernelSU folder into drivers
           mv KernelSU drivers/kernelsu
 
       # 4️⃣ Load lahaina_GKI_defconfig
@@ -40,7 +45,7 @@ jobs:
           cp arch/arm64/configs/vendor/lahaina_GKI.config arch/arm64/configs/lahaina_GKI_defconfig
           make ARCH=arm64 lahaina_GKI_defconfig
 
-      # 5️⃣ Build kernel using all cores
+      # 5️⃣ Build kernel using all CPU cores
       - name: Build kernel
         run: |
           make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE
