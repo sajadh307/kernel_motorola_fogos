@@ -13,7 +13,7 @@ jobs:
       ARCH: arm64
       CROSS_COMPILE: aarch64-linux-gnu-
     steps:
-      # 1️⃣ Checkout repo
+      # 1️⃣ Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,9 +27,12 @@ jobs:
       # 3️⃣ Move KernelSU folder to drivers/kernelsu
       - name: Move KernelSU folder
         run: |
-          if [ -d "KernelSU" ]; then
-            mv KernelSU drivers/kernelsu
+          # Remove any existing file/folder to avoid errors
+          if [ -e drivers/kernelsu ]; then
+            rm -rf drivers/kernelsu
           fi
+          # Move KernelSU to correct folder
+          mv KernelSU drivers/kernelsu
 
       # 4️⃣ Load lahaina_GKI_defconfig
       - name: Load defconfig
@@ -42,7 +45,7 @@ jobs:
         run: |
           make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE
 
-      # 6️⃣ Copy KernelSU folder + DTBs + kernel image
+      # 6️⃣ Package kernel + DTBs + KernelSU folder
       - name: Package kernel
         run: |
           mkdir -p out
@@ -51,7 +54,7 @@ jobs:
           cp -r drivers/kernelsu out/KernelSU || true
           zip -r motorola_g45_kernel.zip out
 
-      # 7️⃣ Upload artifact
+      # 7️⃣ Upload compiled kernel as artifact
       - name: Upload compiled kernel
         uses: actions/upload-artifact@v4
         with:
