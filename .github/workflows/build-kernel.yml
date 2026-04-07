@@ -47,7 +47,7 @@ jobs:
           cp -v arch/arm64/boot/Image.gz-dtb out/
 
       - name: Upload compiled kernel
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: compiled-kernel
           path: out/
