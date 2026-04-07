@@ -1,4 +1,4 @@
-name: Build Motorola G45 Kernel (fast, KernelSU ready)
+name: Build Motorola G45 Kernel (KernelSU ready)
 
 on:
   push:
@@ -17,41 +17,43 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2️⃣ Install all dependencies including ARM64 cross compiler
+      # 2️⃣ Install dependencies including ARM64 cross-compiler
       - name: Install build dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
-            git wget curl zip unzip python3 make clang gcc bc bison flex \
+          sudo apt install -y git wget curl zip unzip python3 make clang gcc bc bison flex \
             libncurses-dev rsync libssl-dev crossbuild-essential-arm64
 
-      # 3️⃣ Load defconfig for Motorola G45 (lahaina)
+      # 3️⃣ Move KernelSU folder to drivers/kernelsu
+      - name: Move KernelSU folder
+        run: |
+          if [ -d "KernelSU" ]; then
+            mv KernelSU drivers/kernelsu
+          fi
+
+      # 4️⃣ Load lahaina_GKI_defconfig
       - name: Load defconfig
         run: |
           cp arch/arm64/configs/vendor/lahaina_GKI.config arch/arm64/configs/lahaina_GKI_defconfig
           make ARCH=arm64 lahaina_GKI_defconfig
 
-      # 4️⃣ Build kernel fast (all cores)
+      # 5️⃣ Build kernel using all cores
       - name: Build kernel
         run: |
           make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE
 
-      # 5️⃣ Optional: copy KernelSU folder if you want root support
-      - name: Copy KernelSU folder
+      # 6️⃣ Copy KernelSU folder + DTBs + kernel image
+      - name: Package kernel
         run: |
           mkdir -p out
-          cp -r KernelSU out/KernelSU || true
-
-      # 6️⃣ Archive kernel + DTBs
-      - name: Archive compiled kernel
-        run: |
           cp arch/arm64/boot/Image.gz-dtb out/
           cp arch/arm64/boot/dts/qcom/*.dtb out/ || true
-          zip -r kernel_build.zip out
+          cp -r drivers/kernelsu out/KernelSU || true
+          zip -r motorola_g45_kernel.zip out
 
       # 7️⃣ Upload artifact
-      - name: Upload kernel artifact
+      - name: Upload compiled kernel
         uses: actions/upload-artifact@v4
         with:
           name: motorola_g45_kernel
-          path: kernel_build.zip
+          path: motorola_g45_kernel.zip
