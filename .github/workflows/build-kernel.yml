@@ -23,15 +23,15 @@ jobs:
           sudo apt update
           sudo apt install -y git bc bison flex libssl-dev make libc6-dev \
             libncurses5-dev lld device-tree-compiler libelf-dev \
-            zlib1g-dev wget tar python3 binutils-aarch64-linux-gnu \
-            gcc-aarch64-linux-gnu
-
-      - name: Download Android prebuilt Clang
-        run: |
-          mkdir -p clang
-          wget -q https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android12-release/clang-r416183b.tar.gz -O clang.tar.gz
-          tar -xf clang.tar.gz -C clang
-          echo "$PWD/clang/bin" >> $GITHUB_PATH
+            zlib1g-dev wget tar clang-14 llvm-14 \
+            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
+          sudo ln -sf /usr/bin/clang-14 /usr/bin/clang
+          sudo ln -sf /usr/bin/ld.lld-14 /usr/bin/ld.lld
+          sudo ln -sf /usr/bin/llvm-ar-14 /usr/bin/llvm-ar
+          sudo ln -sf /usr/bin/llvm-nm-14 /usr/bin/llvm-nm
+          sudo ln -sf /usr/bin/llvm-objcopy-14 /usr/bin/llvm-objcopy
+          sudo ln -sf /usr/bin/llvm-objdump-14 /usr/bin/llvm-objdump
+          sudo ln -sf /usr/bin/llvm-strip-14 /usr/bin/llvm-strip
 
       - name: Set compiler env
         run: |
@@ -42,6 +42,18 @@ jobs:
 
       - name: Clone KernelSU
         run: git clone https://github.com/tiann/KernelSU.git KernelSU
+
+      - name: Patch kernel sources
+        run: |
+          # Fix mm/vmstat.c - _fops vs _sops mismatch
+          sed -i 's/&unusable_fops/\&unusable_sops/g' mm/vmstat.c
+          sed -i 's/&extfrag_fops/\&extfrag_sops/g' mm/vmstat.c
+
+          # Fix kernel/locking/rtmutex.c - missing Android vendor hook header
+          sed -i '1s/^/#include <trace\/hooks\/locking.h>\n/' kernel/locking/rtmutex.c
+
+          # Fix fs/nfs/dir.c - disable NFS (not needed on phone)
+          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
 
       - name: Enable KernelSU and setup defconfig
         run: |
