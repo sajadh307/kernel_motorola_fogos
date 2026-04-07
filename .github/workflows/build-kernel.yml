@@ -36,10 +36,6 @@ jobs:
       - name: Clone KernelSU
         run: git clone https://github.com/tiann/KernelSU.git KernelSU
 
-      - name: Fix trampoline.c missing include
-        run: |
-          sed -i '/#include <linux\/filter.h>/a #include <linux\/rcupdate_trace.h>' kernel/bpf/trampoline.c
-
       - name: Enable KernelSU and setup defconfig
         run: |
           sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' arch/arm64/configs/defconfig
