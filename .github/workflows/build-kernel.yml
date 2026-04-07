@@ -21,17 +21,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y git clang gcc make bc bison flex libncurses-dev libssl-dev python3 rsync unzip
-
-      - name: Move KernelSU folder safely
-        run: |
-          if [ -f drivers/kernelsu ]; then
-            echo "drivers/kernelsu is a file, deleting..."
-            rm -f drivers/kernelsu
-          elif [ -d drivers/kernelsu ]; then
-            echo "drivers/kernelsu is a directory, deleting..."
-            rm -rf drivers/kernelsu
-          fi
-          mv KernelSU drivers/kernelsu
+          
 
       - name: Load defconfig
         run: |
