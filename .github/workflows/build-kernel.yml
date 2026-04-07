@@ -23,7 +23,7 @@ jobs:
 
       - name: Load defconfig
         run: |
-          cd kernel_motorola_fogos
+          cd $GITHUB_WORKSPACE
           cp arch/arm64/configs/vendor/lahaina_GKI.config arch/arm64/configs/lahaina_GKI_defconfig
           make ARCH=arm64 lahaina_GKI_defconfig
 
