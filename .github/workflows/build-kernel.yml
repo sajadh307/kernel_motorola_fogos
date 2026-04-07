@@ -1,105 +1,47 @@
-name: Build Kernel - Moto G45 (fogos)
+name: Build Motorola G45 Kernel Fast
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      BUILD_TYPE:
-        description: 'Build type'
-        required: true
-        default: 'new'
-        type: choice
-        options:
-          - 'new'
-          - 'rebuild'
-      CLEAR_CCACHE:
-        description: 'Clear ccache before building?'
-        required: false
-        default: 'false'
-        type: choice
-        options:
-          - 'false'
-          - 'true'
-
-env:
-  KERNEL_REPO: prabhatkrmishra/kernel_motorola_fogos
-  KERNEL_BRANCH: "15.0"
 
 jobs:
-  build:
-    name: fogos | MSM-5.4 | Blair | KernelSU
-    runs-on: ubuntu-22.04
-    timeout-minutes: 240
-
+  build_kernel:
+    runs-on: ubuntu-latest
+    env:
+      ARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
     steps:
-      - name: Install dependencies
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            git bc bison flex zip unzip wget curl cpio kmod \
-            libssl-dev libelf-dev libncurses-dev libtinfo5 \
-            python3 python-is-python3 \
-            build-essential ccache lz4 zstd
-
-      # 🔥 IMPORTANT FIX: disable credential injection
-      - name: Checkout kernel source (clean)
+      - name: Checkout kernel source
         uses: actions/checkout@v4
-        with:
-          repository: ${{ env.KERNEL_REPO }}
-          ref: ${{ env.KERNEL_BRANCH }}
-          path: kernel/msm-5.4
-          submodules: recursive
-          fetch-depth: 1
-          persist-credentials: false
 
-      # 🔥 CLEAN git config completely
-      - name: Reset git config
+      - name: Install build dependencies
         run: |
-          git config --global --unset-all http.https://github.com/.extraheader || true
-          git config --global --unset credential.helper || true
+          sudo apt update
+          sudo apt install -y git wget curl zip unzip python3 make clang gcc bc bison flex libncurses-dev rsync libssl-dev
 
-      - name: Create workspace
+      - name: Load defconfig
         run: |
-          mkdir -p build
-          mkdir -p prebuilts-master/clang/host/linux-x86
+          cd kernel_motorola_fogos
+          cp arch/arm64/configs/vendor/lahaina_GKI.config arch/arm64/configs/lahaina_GKI_defconfig
+          make ARCH=arm64 lahaina_GKI_defconfig
 
-      - name: Clone build tools (WORKING)
+      - name: Build kernel (fast)
         run: |
-          git clone https://android.googlesource.com/kernel/build build \
-            --depth=1
+          cd kernel_motorola_fogos
+          make -j$(nproc) ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE
 
-      - name: Clone clang (WORKING)
+      - name: Archive compiled kernel
         run: |
-          cd prebuilts-master/clang/host/linux-x86
-          git clone https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86 \
-            --depth=1
-          mv linux-x86/clang-r547379 .
-          rm -rf linux-x86
+          cd kernel_motorola_fogos
+          mkdir -p out
+          cp arch/arm64/boot/Image.gz-dtb out/
+          cp arch/arm64/boot/dts/qcom/*.dtb out/ || true
+          zip -r kernel_build.zip out
 
-      - name: Setup ccache
-        run: |
-          echo "CCACHE_DIR=$HOME/.ccache" >> $GITHUB_ENV
-          ccache --max-size=10G
-          ccache -z
-
-      - name: Build kernel
-        run: |
-          cp kernel/msm-5.4/build_kernel.sh build_kernel.sh
-          chmod +x build_kernel.sh
-          bash build_kernel.sh --${{ github.event.inputs.BUILD_TYPE }}
-
-      - name: Check output
-        run: |
-          ls -lh out/
-
-      - name: Create zip
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3.git --depth=1
-          cp out/Image.gz AnyKernel3/
-          cd AnyKernel3
-          zip -r9 ../kernel.zip .
-
-      - name: Upload
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kernel
-          path: kernel.zip
+          name: motorola_g45_kernel
+          path: kernel_motorola_fogos/kernel_build.zip
