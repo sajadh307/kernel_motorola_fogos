@@ -26,15 +26,7 @@ jobs:
             libncurses-dev rsync libssl-dev crossbuild-essential-arm64
 
       # 3️⃣ Move KernelSU folder safely
-      - name: Move KernelSU folder
-        run: |
-          # Remove existing file or folder if present
-          if [ -f drivers/kernelsu ]; then
-            echo "drivers/kernelsu is a file, deleting..."
-            rm -f drivers/kernelsu
-          elif [ -d drivers/kernelsu ]; then
-            echo "drivers/kernelsu is a directory, deleting..."
-            rm -rf drivers/kernelsu
+      
           fi
           # Move KernelSU folder into drivers
           mv KernelSU drivers/kernelsu
