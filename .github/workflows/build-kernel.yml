@@ -90,18 +90,7 @@ jobs:
               f.write(c)
           print("fdinfo.c OK")
 
-          # Fix 5: apcs-msm8916.c wrong pointer type
-          with open('drivers/clk/qcom/apcs-msm8916.c', 'r') as f:
-              lines = f.readlines()
-          lines[76] = re.sub(
-              r'=\s*([a-zA-Z_]\w*)',
-              r'= (const struct parent_map *)\1',
-              lines[76])
-          with open('drivers/clk/qcom/apcs-msm8916.c', 'w') as f:
-              f.writelines(lines)
-          print("apcs-msm8916.c OK")
-
-          # Fix 6: qrtr/tun.c missing 4th arg
+          # Fix 5: qrtr/tun.c missing 4th arg
           with open('net/qrtr/tun.c', 'r') as f:
               c = f.read()
           c = c.replace(
@@ -111,49 +100,39 @@ jobs:
               f.write(c)
           print("qrtr/tun.c OK")
 
-          # Fix 7: gcc-qcs404.c - P_GPLL0_OUT_AUX and P_XO missing from enum
-          # The enum is around line 37, we add the missing values after P_GPLL6_OUT_AUX
-          with open('drivers/clk/qcom/gcc-qcs404.c', 'r') as f:
-              c = f.read()
-          # Add missing enum values right after P_GPLL6_OUT_AUX
-          c = c.replace(
-              'P_GPLL6_OUT_AUX,',
-              'P_GPLL6_OUT_AUX,\n\tP_GPLL0_OUT_AUX,\n\tP_XO,')
-          with open('drivers/clk/qcom/gcc-qcs404.c', 'w') as f:
-              f.write(c)
-          print("gcc-qcs404.c OK")
+          # Fix 6: Remove broken non-SM6375 qcom clock drivers from Makefile
+          # gcc-qcs404 (QCS404 chip) and apcs-msm8916 (MSM8916 chip) are not
+          # needed for SM6375 and have broken/incompatible code
+          with open('drivers/clk/qcom/Makefile', 'r') as f:
+              lines = f.readlines()
+          before = len(lines)
+          lines = [l for l in lines if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l]
+          after = len(lines)
+          with open('drivers/clk/qcom/Makefile', 'w') as f:
+              f.writelines(lines)
+          print(f"qcom/Makefile: removed {before-after} lines OK")
 
-          # Fix 8: mac80211 duplicate minstrel - patch Makefile directly
+          # Fix 7: mac80211 minstrel duplicate symbols
+          # Remove the minstrel inclusion from mac80211 entirely
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          print("mac80211 Makefile minstrel lines:")
-          for i, line in enumerate(c.split('\n')):
-              if 'minstrel' in line.lower():
-                  print(f"  {i}: {line}")
-          # Remove minstrel_ht from rc80211_minstrel list if it appears twice
-          # by commenting out the duplicate
-          lines = c.split('\n')
-          minstrel_ht_count = sum(1 for l in lines if 'minstrel_ht' in l)
-          print(f"minstrel_ht appears {minstrel_ht_count} times in Makefile")
-          if minstrel_ht_count > 1:
-              # Keep first occurrence, comment out subsequent ones
-              found = False
-              new_lines = []
-              for line in lines:
-                  if 'minstrel_ht' in line:
-                      if found:
-                          new_lines.append('# PATCHED_DUPLICATE: ' + line)
-                      else:
-                          new_lines.append(line)
-                          found = True
-                  else:
-                      new_lines.append(line)
-              c = '\n'.join(new_lines)
-              with open('net/mac80211/Makefile', 'w') as f:
-                  f.write(c)
-              print("mac80211 Makefile minstrel_ht deduped OK")
-          else:
-              print("Only 1 minstrel_ht in Makefile - issue is elsewhere")
+          # Comment out the line that adds minstrel objects to mac80211
+          c = re.sub(
+              r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
+              r'# PATCHED_OUT: \1',
+              c, flags=re.MULTILINE)
+          # Also remove the rc80211_minstrel-y definition to avoid orphan objects
+          c = re.sub(
+              r'^(rc80211_minstrel-y\s*:=)',
+              r'# PATCHED_OUT: \1',
+              c, flags=re.MULTILINE)
+          c = re.sub(
+              r'^(rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=)',
+              r'# PATCHED_OUT: \1',
+              c, flags=re.MULTILINE)
+          with open('net/mac80211/Makefile', 'w') as f:
+              f.write(c)
+          print("mac80211 Makefile minstrel removed OK")
 
           print("All patches done")
           PYEOF
