@@ -17,6 +17,8 @@ jobs:
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install dependencies
         run: |
@@ -30,24 +32,56 @@ jobs:
         run: |
           echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
           echo "CC=clang" >> $GITHUB_ENV
+          echo "LD=ld.lld" >> $GITHUB_ENV
           echo "LLVM=1" >> $GITHUB_ENV
           echo "LLVM_IAS=1" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-
-      - name: Clone KernelSU
-        run: git clone https://github.com/tiann/KernelSU.git KernelSU
 
       - name: Patch kernel sources
         run: |
-          # Fix mm/vmstat.c - _fops vs _sops mismatch
-          sed -i 's/&unusable_fops/\&unusable_sops/g' mm/vmstat.c
-          sed -i 's/&extfrag_fops/\&extfrag_sops/g' mm/vmstat.c
+          # Fix 1: vmstat.c uses DEFINE_SEQ_ATTRIBUTE which doesn't exist in kernel 5.4
+          # Replace the macro calls with explicit file_operations structs
+          python3 << 'PYEOF'
+          with open('mm/vmstat.c', 'r') as f:
+              content = f.read()
 
-          # Fix kernel/locking/rtmutex.c - missing Android vendor hook header
-          sed -i '1s/^/#include <trace\/hooks\/locking.h>\n/' kernel/locking/rtmutex.c
+          content = content.replace(
+              'DEFINE_SEQ_ATTRIBUTE(unusable);',
+              """static int unusable_open(struct inode *inode, struct file *file)
+          {
+              return seq_open(file, &unusable_sops);
+          }
+          static const struct file_operations unusable_fops = {
+              .owner   = THIS_MODULE,
+              .open    = unusable_open,
+              .read    = seq_read,
+              .llseek  = seq_lseek,
+              .release = seq_release,
+          };"""
+          )
 
-          # Disable NFS to avoid fs/nfs/dir.c errors - not needed on phone
-          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
+          content = content.replace(
+              'DEFINE_SEQ_ATTRIBUTE(extfrag);',
+              """static int extfrag_open(struct inode *inode, struct file *file)
+          {
+              return seq_open(file, &extfrag_sops);
+          }
+          static const struct file_operations extfrag_fops = {
+              .owner   = THIS_MODULE,
+              .open    = extfrag_open,
+              .read    = seq_read,
+              .llseek  = seq_lseek,
+              .release = seq_release,
+          };"""
+          )
+
+          with open('mm/vmstat.c', 'w') as f:
+              f.write(content)
+          print("vmstat.c patched OK")
+          PYEOF
+
+          # Fix 2: rtmutex.c calls Android vendor hooks but is missing the header
+          sed -i '1s|^|#include <trace/hooks/locking.h>\n|' kernel/locking/rtmutex.c
+          echo "rtmutex.c patched OK"
 
       - name: Enable KernelSU and setup defconfig
         run: |
