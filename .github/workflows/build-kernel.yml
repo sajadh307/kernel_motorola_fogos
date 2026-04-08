@@ -23,7 +23,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y git bc bison flex libssl-dev make libc6-dev \
+          sudo apt install -y \
+            git bc bison flex libssl-dev make libc6-dev \
             libncurses5-dev device-tree-compiler libelf-dev \
             zlib1g-dev wget tar clang llvm lld \
             binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
@@ -39,25 +40,39 @@ jobs:
       - name: Patch kernel sources
         run: |
           python3 << 'PYEOF'
-          import re, os, glob
+          import os, re, glob
 
+          # vmstat.c
           with open('mm/vmstat.c', 'r') as f:
               c = f.read()
-          c = c.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
-              "static int unusable_open(struct inode *i, struct file *f)"
-              " { return seq_open(f, &unusable_sops); }\n"
-              "static const struct file_operations unusable_fops = {"
-              " .owner=THIS_MODULE, .open=unusable_open, .read=seq_read,"
-              " .llseek=seq_lseek, .release=seq_release };")
-          c = c.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
-              "static int extfrag_open(struct inode *i, struct file *f)"
-              " { return seq_open(f, &extfrag_sops); }\n"
-              "static const struct file_operations extfrag_fops = {"
-              " .owner=THIS_MODULE, .open=extfrag_open, .read=seq_read,"
-              " .llseek=seq_lseek, .release=seq_release };")
+          c = c.replace(
+              'DEFINE_SEQ_ATTRIBUTE(unusable);',
+              '''static int unusable_open(struct inode *i, struct file *f)
+          { return seq_open(f, &unusable_sops); }
+          static const struct file_operations unusable_fops = {
+            .owner = THIS_MODULE,
+            .open = unusable_open,
+            .read = seq_read,
+            .llseek = seq_lseek,
+            .release = seq_release,
+          };'''
+          )
+          c = c.replace(
+              'DEFINE_SEQ_ATTRIBUTE(extfrag);',
+              '''static int extfrag_open(struct inode *i, struct file *f)
+          { return seq_open(f, &extfrag_sops); }
+          static const struct file_operations extfrag_fops = {
+            .owner = THIS_MODULE,
+            .open = extfrag_open,
+            .read = seq_read,
+            .llseek = seq_lseek,
+            .release = seq_release,
+          };'''
+          )
           with open('mm/vmstat.c', 'w') as f:
               f.write(c)
 
+          # rtmutex.c
           with open('kernel/locking/rtmutex.c', 'r') as f:
               c = f.read()
           c = c.replace('trace_android_vh_rtmutex_wait_start(lock);', '/* stub */')
@@ -65,41 +80,57 @@ jobs:
           with open('kernel/locking/rtmutex.c', 'w') as f:
               f.write(c)
 
+          # taskstats.c
           with open('kernel/taskstats.c', 'r') as f:
               lines = f.readlines()
-          lines = ['#else\n' if l.strip() == '#elif' else l for l in lines]
+          lines = ['#else\n' if line.strip() == '#elif' else line for line in lines]
           with open('kernel/taskstats.c', 'w') as f:
               f.writelines(lines)
 
+          # fdinfo.c
           with open('fs/notify/fdinfo.c', 'r') as f:
               c = f.read()
           c = re.sub(
               r'(static void \w+\(struct seq_file \*\w+,\s*struct fsnotify_mark \*\w+\))',
               lambda m: m.group(0)[:-1] + ', struct file *__f)',
-              c)
+              c
+          )
           with open('fs/notify/fdinfo.c', 'w') as f:
               f.write(c)
 
+          # qrtr/tun.c
           with open('net/qrtr/tun.c', 'r') as f:
               c = f.read()
           c = c.replace(
               'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0)',
-              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)')
+              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)'
+          )
           with open('net/qrtr/tun.c', 'w') as f:
               f.write(c)
 
+          # qcom clk cleanup
           with open('drivers/clk/qcom/Makefile', 'r') as f:
               lines = f.readlines()
-          lines = [l for l in lines if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l]
+          lines = [
+              l for l in lines
+              if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l
+          ]
           with open('drivers/clk/qcom/Makefile', 'w') as f:
               f.writelines(lines)
 
+          # mac80211
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          c = re.sub(r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)', r'# \1', c, flags=re.MULTILINE)
+          c = re.sub(
+              r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
+              r'# \1',
+              c,
+              flags=re.MULTILINE
+          )
           with open('net/mac80211/Makefile', 'w') as f:
               f.write(c)
 
+          # touchscreen fix
           for path in glob.glob('drivers/input/touchscreen/**/*.c', recursive=True):
               with open(path, 'r', errors='ignore') as f:
                   c = f.read()
@@ -108,37 +139,46 @@ jobs:
                   with open(path, 'w') as f:
                       f.write(c)
 
-          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
+          # i2c-qcom-geni.c
+          path = 'drivers/i2c/busses/i2c-qcom-geni.c'
+          with open(path, 'r') as f:
               c = f.read()
 
           if 'static inline void geni_write_reg' not in c:
               include_end = c.find('\n\n', c.find('#include'))
               shim = '''
 
-static inline void geni_write_reg(u32 val, void __iomem *base, int offset)
-{
-    writel_relaxed(val, base + offset);
-}
-'''
+          static inline void geni_write_reg(u32 val, void __iomem *base, int offset)
+          {
+              writel_relaxed(val, base + offset);
+          }
+          '''
               c = c[:include_end] + shim + c[include_end:]
 
           c = c.replace('gi2c->base,', 'gi2c->se.base,')
           c = c.replace('gi2c->base +', 'gi2c->se.base +')
 
-          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
+          with open(path, 'w') as f:
               f.write(c)
 
+          # flask.h
           flask_path = 'security/selinux/include/flask.h'
           if not os.path.exists(flask_path):
               with open(flask_path, 'w') as f:
-                  f.write('#ifndef _SELINUX_FLASK_H_\n#define _SELINUX_FLASK_H_\n#endif\n')
+                  f.write(
+                      '#ifndef _SELINUX_FLASK_H_\n'
+                      '#define _SELINUX_FLASK_H_\n'
+                      '#endif\n'
+                  )
 
           print("All patches applied")
           PYEOF
 
       - name: Enable KernelSU and setup defconfig
         run: |
-          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' arch/arm64/configs/vendor/fogos_stock-config || true
+          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' \
+            arch/arm64/configs/vendor/fogos_stock-config || true
+
           make O=out vendor/fogos_stock-config \
             ARCH=arm64 \
             CC=clang \
@@ -159,7 +199,9 @@ static inline void geni_write_reg(u32 val, void __iomem *base, int offset)
             STRIP=llvm-strip \
             LLVM=1 \
             LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            2>&1 | tee build.log
+
           exit ${PIPESTATUS[0]}
 
       - name: Upload kernel artifact
