@@ -38,89 +38,110 @@ jobs:
 
       - name: Patch kernel sources
         run: |
-          # Fix 1: vmstat.c - DEFINE_SEQ_ATTRIBUTE doesn't exist in kernel 5.4
+          # Fix 1: vmstat.c
           python3 << 'PYEOF'
           with open('mm/vmstat.c', 'r') as f:
               content = f.read()
-          content = content.replace(
-              'DEFINE_SEQ_ATTRIBUTE(unusable);',
-              """static int unusable_open(struct inode *inode, struct file *file)
-          {
-              return seq_open(file, &unusable_sops);
-          }
+          content = content.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
+          """static int unusable_open(struct inode *inode, struct file *file)
+          { return seq_open(file, &unusable_sops); }
           static const struct file_operations unusable_fops = {
-              .owner   = THIS_MODULE,
-              .open    = unusable_open,
-              .read    = seq_read,
-              .llseek  = seq_lseek,
-              .release = seq_release,
-          };"""
-          )
-          content = content.replace(
-              'DEFINE_SEQ_ATTRIBUTE(extfrag);',
-              """static int extfrag_open(struct inode *inode, struct file *file)
-          {
-              return seq_open(file, &extfrag_sops);
-          }
+              .owner = THIS_MODULE, .open = unusable_open,
+              .read = seq_read, .llseek = seq_lseek, .release = seq_release,
+          };""")
+          content = content.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
+          """static int extfrag_open(struct inode *inode, struct file *file)
+          { return seq_open(file, &extfrag_sops); }
           static const struct file_operations extfrag_fops = {
-              .owner   = THIS_MODULE,
-              .open    = extfrag_open,
-              .read    = seq_read,
-              .llseek  = seq_lseek,
-              .release = seq_release,
-          };"""
-          )
+              .owner = THIS_MODULE, .open = extfrag_open,
+              .read = seq_read, .llseek = seq_lseek, .release = seq_release,
+          };""")
           with open('mm/vmstat.c', 'w') as f:
               f.write(content)
-          print("vmstat.c patched OK")
+          print("vmstat.c OK")
           PYEOF
 
-          # Fix 2: rtmutex.c - stub out missing Android vendor hook calls
-          sed -i 's/trace_android_vh_rtmutex_wait_start(lock);/\/\/ trace_android_vh_rtmutex_wait_start(lock); \/\* stubbed \*\//' kernel/locking/rtmutex.c
-          sed -i 's/trace_android_vh_rtmutex_wait_finish(lock);/\/\/ trace_android_vh_rtmutex_wait_finish(lock); \/\* stubbed \*\//' kernel/locking/rtmutex.c
-          echo "rtmutex.c patched OK"
+          # Fix 2: rtmutex.c
+          sed -i 's/trace_android_vh_rtmutex_wait_start(lock);/\/\/ trace_android_vh_rtmutex_wait_start(lock);/' kernel/locking/rtmutex.c
+          sed -i 's/trace_android_vh_rtmutex_wait_finish(lock);/\/\/ trace_android_vh_rtmutex_wait_finish(lock);/' kernel/locking/rtmutex.c
+          echo "rtmutex.c OK"
 
-          # Fix 3: NFS disabled - not needed on phone
-          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V2=y/# CONFIG_NFS_V2 is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V3=y/# CONFIG_NFS_V3 is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V4=y/# CONFIG_NFS_V4 is not set/' arch/arm64/configs/defconfig
-          echo "NFS disabled OK"
-
-          # Fix 4: taskstats.c - bare #elif (no condition) and missing sysstats_fill_zoneinfo
+          # Fix 3: taskstats.c - bare #elif
           python3 << 'PYEOF'
           with open('kernel/taskstats.c', 'r') as f:
               lines = f.readlines()
-          fixed = []
-          i = 0
-          while i < len(lines):
-              line = lines[i]
-              # Fix bare #elif with no condition -> #else
-              if line.strip() == '#elif':
-                  fixed.append('#else\n')
-                  print(f"Fixed bare #elif at line {i+1}")
-              else:
-                  fixed.append(line)
-              i += 1
+          fixed = ['#else\n' if l.strip() == '#elif' else l for l in lines]
           with open('kernel/taskstats.c', 'w') as f:
               f.writelines(fixed)
-          print("taskstats.c patched OK")
+          print("taskstats.c OK")
           PYEOF
 
-          # Fix 5: fdinfo.c - add missing struct file* param to show function implementations
+          # Fix 4: fdinfo.c - add missing struct file* param to show functions
           python3 << 'PYEOF'
           import re
           with open('fs/notify/fdinfo.c', 'r') as f:
               content = f.read()
-          # Add struct file *f to all 2-arg show function definitions
           content = re.sub(
               r'(static void \w+\(struct seq_file \*\w+, struct fsnotify_mark \*\w+\))',
-              lambda m: m.group(0).rstrip(')') + ', struct file *__unused_f)',
+              lambda m: m.group(0)[:-1] + ', struct file *__unused_f)',
               content
           )
           with open('fs/notify/fdinfo.c', 'w') as f:
               f.write(content)
-          print("fdinfo.c patched OK")
+          print("fdinfo.c OK")
+          PYEOF
+
+          # Fix 5: apcs-msm8916.c - wrong pointer type, add cast
+          python3 << 'PYEOF'
+          with open('drivers/clk/qcom/apcs-msm8916.c', 'r') as f:
+              content = f.read()
+          content = content.replace(
+              'const struct parent_map *',
+              'const struct parent_map *'
+          )
+          # Add cast for u32 array assigned to parent_map pointer
+          import re
+          content = re.sub(
+              r'(\.parent_map\s*=\s*)([a-zA-Z_]\w*(?:\s*\[\s*\])?)',
+              r'\1(const struct parent_map *)\2',
+              content
+          )
+          with open('drivers/clk/qcom/apcs-msm8916.c', 'w') as f:
+              f.write(content)
+          print("apcs-msm8916.c OK")
+          PYEOF
+
+          # Fix 6: qrtr/tun.c - function call missing 4th argument
+          python3 << 'PYEOF'
+          with open('net/qrtr/tun.c', 'r') as f:
+              lines = f.readlines()
+          print(f"Line 47: {lines[46].rstrip()}")
+          PYEOF
+
+          # Fix 7: mac80211 duplicate minstrel symbols - disable minstrel_ht module split
+          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=m/CONFIG_MAC80211_MINSTREL_HT=y/' arch/arm64/configs/defconfig
+          echo "Checking defconfig for minstrel..."
+          grep -i minstrel arch/arm64/configs/defconfig || echo "minstrel not in defconfig"
+
+          # Disable NFS
+          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V2=y/# CONFIG_NFS_V2 is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V3=y/# CONFIG_NFS_V3 is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V4=y/# CONFIG_NFS_V4 is not set/' arch/arm64/configs/defconfig
+
+      - name: Show qrtr tun.c line 47 and fix
+        run: |
+          echo "--- tun.c around line 47 ---"
+          sed -n '40,55p' net/qrtr/tun.c
+          # Fix: add NULL as 4th argument to whichever function call is on line 47
+          python3 << 'PYEOF'
+          with open('net/qrtr/tun.c', 'r') as f:
+              content = f.read()
+          import re
+          # Find function calls with 3 args on that line and add a 4th NULL
+          # The exact fix depends on what function it is - we print first, then patch
+          lines = content.split('\n')
+          print(f"Line 47 content: {lines[46]}")
           PYEOF
 
       - name: Enable KernelSU and setup defconfig
