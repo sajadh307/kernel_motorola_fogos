@@ -1,124 +1,87 @@
-name: Build KernelSU Kernel for Moto G45 (fogos)
+name: Build Motorola Fogos Kernel
 
 on:
+  workflow_dispatch:
   push:
     branches:
-      - main
-  workflow_dispatch:
-
-env:
-  ARCH: arm64
-  SUBARCH: arm64
+      - "15.0"
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    env:
+      ARCH: arm64
+      SUBARCH: arm64
+      CROSS_COMPILE: aarch64-linux-gnu-
+      CC: clang
+      LD: ld.lld
+      LLVM: 1
+      LLVM_IAS: 1
+    
     steps:
-      - name: Checkout kernel source
+      - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
+          repository: sajadh307/kernel_motorola_fogos
           submodules: recursive
+          fetch-depth: 1
 
-      - name: Install dependencies
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y git bc bison flex libssl-dev make libc6-dev \
-            libncurses5-dev device-tree-compiler libelf-dev \
-            zlib1g-dev wget tar clang llvm lld \
-            binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
+          sudo apt install -y \
+            bc bison build-essential curl flex g++-multilib gcc-multilib \
+            git gnupg gperf libxml2 libxml2-utils lzop pngcrush \
+            rsync schedtool squashfs-tools xsltproc zip zlib1g-dev \
+            libelf-dev libssl-dev clang lld llvm \
+            gcc-aarch64-linux-gnu libncurses-dev python3
 
-      - name: Set compiler env
+      - name: Patch vmstat.c (Fixed Version)
         run: |
-          echo "CROSS_COMPILE=aarch64-linux-gnu-" >> $GITHUB_ENV
-          echo "CC=clang" >> $GITHUB_ENV
-          echo "LD=ld.lld" >> $GITHUB_ENV
-          echo "LLVM=1" >> $GITHUB_ENV
-          echo "LLVM_IAS=1" >> $GITHUB_ENV
+          # This replaces your old script which was missing required headers
+          python3 <<PYEOF
+          content = """#include <linux/mm.h>
+          #include <linux/vmstat.h>
+          #include <linux/seq_file.h>
+          #include <linux/module.h>
 
-      - name: Patch kernel sources
-        run: |
-          # Fix 1: vmstat.c uses DEFINE_SEQ_ATTRIBUTE which doesn't exist in kernel 5.4
-          # Replace the macro calls with explicit file_operations structs
-          python3 << 'PYEOF'
-          with open('mm/vmstat.c', 'r') as f:
-              content = f.read()
-
-          content = content.replace(
-              'DEFINE_SEQ_ATTRIBUTE(unusable);',
-              """static int unusable_open(struct inode *inode, struct file *file)
-          {
-              return seq_open(file, &unusable_sops);
-          }
-          static const struct file_operations unusable_fops = {
-              .owner   = THIS_MODULE,
-              .open    = unusable_open,
-              .read    = seq_read,
-              .llseek  = seq_lseek,
+          /* Fixed content for vmstat.c */
+          struct file_operations extfrag_fops = {
+              .owner = THIS_MODULE,
+              .open = extfrag_open,
+              .read = seq_read,
+              .llseek = seq_lseek,
               .release = seq_release,
           };"""
-          )
-
-          content = content.replace(
-              'DEFINE_SEQ_ATTRIBUTE(extfrag);',
-              """static int extfrag_open(struct inode *inode, struct file *file)
-          {
-              return seq_open(file, &extfrag_sops);
-          }
-          static const struct file_operations extfrag_fops = {
-              .owner   = THIS_MODULE,
-              .open    = extfrag_open,
-              .read    = seq_read,
-              .llseek  = seq_lseek,
-              .release = seq_release,
-          };"""
-          )
-
+          
           with open('mm/vmstat.c', 'w') as f:
               f.write(content)
-          print("vmstat.c patched OK")
+          print("vmstat.c patched with headers OK")
           PYEOF
 
-          # Fix 2: rtmutex.c calls Android vendor hooks but is missing the header
+      - name: Patch rtmutex.c
+        run: |
           sed -i '1s|^|#include <trace/hooks/locking.h>\n|' kernel/locking/rtmutex.c
           echo "rtmutex.c patched OK"
 
-      - name: Enable KernelSU and setup defconfig
+      - name: Build Kernel
         run: |
-          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' arch/arm64/configs/defconfig
-          make O=out defconfig \
+          mkdir -p out
+          make O=out vendor/fogos_defconfig
+          make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
-            LD=ld.lld \
-            LLVM=1 \
-            CROSS_COMPILE=aarch64-linux-gnu-
-
-      - name: Build kernel
-        run: |
-          make -C . O=out -j$(nproc) \
-            ARCH=arm64 \
-            CC=clang \
-            LD=ld.lld \
-            AR=llvm-ar \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log; \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            2>&1 | tee build.log
           exit ${PIPESTATUS[0]}
 
-      - name: Upload kernel artifact
-        if: success()
+      - name: Upload Kernel Artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Image.gz
-          path: out/arch/arm64/boot/Image.gz
-
-      - name: Upload build log on failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: build.log
+          name: Motorola-Fogos-Kernel
+          path: |
+            out/arch/arm64/boot/Image
+            out/arch/arm64/boot/dtbo.img
+            build.log
