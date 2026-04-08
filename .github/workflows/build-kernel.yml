@@ -134,46 +134,69 @@ jobs:
                   patched += 1
           print(f"FB_EARLY_EVENT_BLANK fix applied to {patched} files OK")
 
-          # Fix 9: i2c-qcom-geni.c - insert shim AFTER last #include, not top of file
+          # Fix 9: i2c-qcom-geni.c - insert shim after last #include
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               lines = f.readlines()
-          # Find the last #include line
           last_include = 0
           for i, l in enumerate(lines):
               if l.strip().startswith('#include'):
                   last_include = i
           shim = (
-              '\n/* compat shim: geni_write_reg removed in this kernel version */\n'
+              '\n/* compat shim */\n'
               'static inline void geni_write_reg(u32 val, void __iomem *base, int offset)\n'
               '{ writel_relaxed(val, base + offset); }\n\n'
           )
-          # Only add if not already present
           full = ''.join(lines)
           if 'static inline void geni_write_reg' not in full:
               lines.insert(last_include + 1, shim)
           full = ''.join(lines)
-          # Fix ->base to ->se.base for the one remaining raw usage
           full = full.replace('gi2c->base,', 'gi2c->se.base,')
           full = full.replace('gi2c->base +', 'gi2c->se.base +')
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
               f.write(full)
-          print(f"i2c-qcom-geni.c shim inserted after line {last_include+1} OK")
+          print("i2c-qcom-geni.c OK")
 
           # Fix 10: flask.h
           flask_path = 'security/selinux/include/flask.h'
           if not os.path.exists(flask_path):
-              content = ("/* Auto-generated minimal flask.h */\n"
-                         "#ifndef _SELINUX_FLASK_H_\n#define _SELINUX_FLASK_H_\n"
-                         "#define SECCLASS_SECURITY 1\n#define SECCLASS_PROCESS 2\n"
-                         "#define SECCLASS_SYSTEM 3\n#define SECCLASS_FILE 4\n"
-                         "#define SECINITSID_KERNEL 1\n#define SECINITSID_SECURITY 2\n"
-                         "#define SECINITSID_UNLABELED 3\n#define SECINITSID_NUM 27\n"
-                         "#endif\n")
               with open(flask_path, 'w') as f:
-                  f.write(content)
+                  f.write("/* Auto-generated */\n#ifndef _SELINUX_FLASK_H_\n"
+                          "#define _SELINUX_FLASK_H_\n"
+                          "#define SECCLASS_SECURITY 1\n#define SECCLASS_PROCESS 2\n"
+                          "#define SECCLASS_FILE 4\n#define SECINITSID_KERNEL 1\n"
+                          "#define SECINITSID_UNLABELED 3\n#define SECINITSID_NUM 27\n"
+                          "#endif\n")
               print("flask.h created OK")
           else:
               print("flask.h exists OK")
+
+          # Fix 11: sidtab.h - CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS not defined
+          # KernelSU includes sidtab.h which uses this config value
+          # This kernel doesn't have it so we define it in the header
+          sidtab_path = 'security/selinux/ss/sidtab.h'
+          if os.path.exists(sidtab_path):
+              with open(sidtab_path, 'r') as f:
+                  c = f.read()
+              if 'CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS' in c and \
+                 '#ifndef CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS' not in c:
+                  # Add default define before first use
+                  guard = ('#ifndef CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS\n'
+                           '#define CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS 9\n'
+                           '#endif\n')
+                  # Insert after the last #include in the header
+                  lines = c.split('\n')
+                  last_inc = 0
+                  for i, l in enumerate(lines):
+                      if l.strip().startswith('#include'):
+                          last_inc = i
+                  lines.insert(last_inc + 1, guard)
+                  with open(sidtab_path, 'w') as f:
+                      f.write('\n'.join(lines))
+                  print("sidtab.h patched OK")
+              else:
+                  print("sidtab.h already OK")
+          else:
+              print(f"sidtab.h not found at {sidtab_path}")
 
           print("All patches done")
           PYEOF
