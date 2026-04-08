@@ -41,29 +41,37 @@ jobs:
           python3 << 'PYEOF'
           import re
 
-          # ── Fix 1: vmstat.c ──────────────────────────────────────────────
+          # Fix 1: vmstat.c
           with open('mm/vmstat.c', 'r') as f:
               c = f.read()
           c = c.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
-          "static int unusable_open(struct inode *i, struct file *f) { return seq_open(f, &unusable_sops); }\n"
-          "static const struct file_operations unusable_fops = { .owner=THIS_MODULE, .open=unusable_open, .read=seq_read, .llseek=seq_lseek, .release=seq_release };")
+              "static int unusable_open(struct inode *i, struct file *f)"
+              " { return seq_open(f, &unusable_sops); }\n"
+              "static const struct file_operations unusable_fops = {"
+              " .owner=THIS_MODULE, .open=unusable_open, .read=seq_read,"
+              " .llseek=seq_lseek, .release=seq_release };")
           c = c.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
-          "static int extfrag_open(struct inode *i, struct file *f) { return seq_open(f, &extfrag_sops); }\n"
-          "static const struct file_operations extfrag_fops = { .owner=THIS_MODULE, .open=extfrag_open, .read=seq_read, .llseek=seq_lseek, .release=seq_release };")
+              "static int extfrag_open(struct inode *i, struct file *f)"
+              " { return seq_open(f, &extfrag_sops); }\n"
+              "static const struct file_operations extfrag_fops = {"
+              " .owner=THIS_MODULE, .open=extfrag_open, .read=seq_read,"
+              " .llseek=seq_lseek, .release=seq_release };")
           with open('mm/vmstat.c', 'w') as f:
               f.write(c)
           print("vmstat.c OK")
 
-          # ── Fix 2: rtmutex.c ─────────────────────────────────────────────
+          # Fix 2: rtmutex.c
           with open('kernel/locking/rtmutex.c', 'r') as f:
               c = f.read()
-          c = c.replace('trace_android_vh_rtmutex_wait_start(lock);', '/* trace_android_vh_rtmutex_wait_start stubbed */')
-          c = c.replace('trace_android_vh_rtmutex_wait_finish(lock);', '/* trace_android_vh_rtmutex_wait_finish stubbed */')
+          c = c.replace('trace_android_vh_rtmutex_wait_start(lock);',
+                        '/* trace_android_vh_rtmutex_wait_start stubbed */')
+          c = c.replace('trace_android_vh_rtmutex_wait_finish(lock);',
+                        '/* trace_android_vh_rtmutex_wait_finish stubbed */')
           with open('kernel/locking/rtmutex.c', 'w') as f:
               f.write(c)
           print("rtmutex.c OK")
 
-          # ── Fix 3: taskstats.c bare #elif ────────────────────────────────
+          # Fix 3: taskstats.c bare #elif
           with open('kernel/taskstats.c', 'r') as f:
               lines = f.readlines()
           lines = ['#else\n' if l.strip() == '#elif' else l for l in lines]
@@ -71,55 +79,86 @@ jobs:
               f.writelines(lines)
           print("taskstats.c OK")
 
-          # ── Fix 4: fdinfo.c missing struct file* param ───────────────────
+          # Fix 4: fdinfo.c missing struct file* param
           with open('fs/notify/fdinfo.c', 'r') as f:
               c = f.read()
           c = re.sub(
               r'(static void \w+\(struct seq_file \*\w+,\s*struct fsnotify_mark \*\w+\))',
               lambda m: m.group(0)[:-1] + ', struct file *__f)',
-              c
-          )
+              c)
           with open('fs/notify/fdinfo.c', 'w') as f:
               f.write(c)
           print("fdinfo.c OK")
 
-          # ── Fix 5: apcs-msm8916.c wrong pointer type ─────────────────────
+          # Fix 5: apcs-msm8916.c wrong pointer type
           with open('drivers/clk/qcom/apcs-msm8916.c', 'r') as f:
               lines = f.readlines()
-          print(f"apcs line 77: {lines[76].rstrip()}")
-          # Cast the rhs of the assignment on line 77 to the correct pointer type
           lines[76] = re.sub(
               r'=\s*([a-zA-Z_]\w*)',
               r'= (const struct parent_map *)\1',
-              lines[76]
-          )
-          print(f"apcs line 77 fixed: {lines[76].rstrip()}")
+              lines[76])
           with open('drivers/clk/qcom/apcs-msm8916.c', 'w') as f:
               f.writelines(lines)
           print("apcs-msm8916.c OK")
 
-          # ── Fix 6: qrtr/tun.c missing 4th arg ───────────────────────────
+          # Fix 6: qrtr/tun.c missing 4th arg
           with open('net/qrtr/tun.c', 'r') as f:
               c = f.read()
           c = c.replace(
               'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0)',
-              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)'
-          )
+              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)')
           with open('net/qrtr/tun.c', 'w') as f:
               f.write(c)
           print("qrtr/tun.c OK")
 
-          print("All patches applied")
+          # Fix 7: gcc-qcs404.c - P_GPLL0_OUT_AUX and P_XO missing from enum
+          # The enum is around line 37, we add the missing values after P_GPLL6_OUT_AUX
+          with open('drivers/clk/qcom/gcc-qcs404.c', 'r') as f:
+              c = f.read()
+          # Add missing enum values right after P_GPLL6_OUT_AUX
+          c = c.replace(
+              'P_GPLL6_OUT_AUX,',
+              'P_GPLL6_OUT_AUX,\n\tP_GPLL0_OUT_AUX,\n\tP_XO,')
+          with open('drivers/clk/qcom/gcc-qcs404.c', 'w') as f:
+              f.write(c)
+          print("gcc-qcs404.c OK")
+
+          # Fix 8: mac80211 duplicate minstrel - patch Makefile directly
+          with open('net/mac80211/Makefile', 'r') as f:
+              c = f.read()
+          print("mac80211 Makefile minstrel lines:")
+          for i, line in enumerate(c.split('\n')):
+              if 'minstrel' in line.lower():
+                  print(f"  {i}: {line}")
+          # Remove minstrel_ht from rc80211_minstrel list if it appears twice
+          # by commenting out the duplicate
+          lines = c.split('\n')
+          minstrel_ht_count = sum(1 for l in lines if 'minstrel_ht' in l)
+          print(f"minstrel_ht appears {minstrel_ht_count} times in Makefile")
+          if minstrel_ht_count > 1:
+              # Keep first occurrence, comment out subsequent ones
+              found = False
+              new_lines = []
+              for line in lines:
+                  if 'minstrel_ht' in line:
+                      if found:
+                          new_lines.append('# PATCHED_DUPLICATE: ' + line)
+                      else:
+                          new_lines.append(line)
+                          found = True
+                  else:
+                      new_lines.append(line)
+              c = '\n'.join(new_lines)
+              with open('net/mac80211/Makefile', 'w') as f:
+                  f.write(c)
+              print("mac80211 Makefile minstrel_ht deduped OK")
+          else:
+              print("Only 1 minstrel_ht in Makefile - issue is elsewhere")
+
+          print("All patches done")
           PYEOF
 
-          # ── Fix 7: mac80211 duplicate minstrel symbols ───────────────────
-          # Disable minstrel_ht to avoid duplicate symbol link error
-          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=y/# CONFIG_MAC80211_MINSTREL_HT is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=m/# CONFIG_MAC80211_MINSTREL_HT is not set/' arch/arm64/configs/defconfig
-          echo "# CONFIG_MAC80211_MINSTREL_HT is not set" >> arch/arm64/configs/defconfig
-          echo "minstrel_ht disabled OK"
-
-          # ── Fix 8: Disable NFS ───────────────────────────────────────────
+          # Disable NFS
           for cfg in CONFIG_NFS_FS CONFIG_NFS_V2 CONFIG_NFS_V3 CONFIG_NFS_V4; do
             sed -i "s/${cfg}=y/# ${cfg} is not set/" arch/arm64/configs/defconfig
             sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
