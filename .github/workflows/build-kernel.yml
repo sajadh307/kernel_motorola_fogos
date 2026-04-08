@@ -124,19 +124,7 @@ jobs:
                   with open(path, 'w') as f:
                       f.write(c)
 
-          # Fix 9: i2c-qcom-geni.c
-          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
-              c = f.read()
-          shim = (
-              '\nstatic inline void geni_write_reg(u32 val, void __iomem *base, int offset)'
-              ' { writel_relaxed(val, base + offset); }\n'
-          )
-          if 'geni_write_reg' in c and 'static inline void geni_write_reg' not in c:
-              c = shim + c
-          c = c.replace('gi2c->base,', 'gi2c->se.base,')
-          c = c.replace('gi2c->base +', 'gi2c->se.base +')
-          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
-              f.write(c)
+          # Fix 9 removed (broken i2c-qcom-geni patch)
 
           # Fix 10: Minimal flask.h
           flask_path = 'security/selinux/include/flask.h'
