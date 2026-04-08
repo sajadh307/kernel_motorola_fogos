@@ -23,8 +23,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y \
-            git bc bison flex libssl-dev make libc6-dev \
+          sudo apt install -y git bc bison flex libssl-dev make libc6-dev \
             libncurses5-dev device-tree-compiler libelf-dev \
             zlib1g-dev wget tar clang llvm lld \
             binutils-aarch64-linux-gnu gcc-aarch64-linux-gnu
@@ -40,146 +39,204 @@ jobs:
       - name: Patch kernel sources
         run: |
           python3 << 'PYEOF'
-          import os, re, glob
+          import re, os
 
-          # vmstat.c
+          # Fix 1: vmstat.c
           with open('mm/vmstat.c', 'r') as f:
               c = f.read()
-          c = c.replace(
-              'DEFINE_SEQ_ATTRIBUTE(unusable);',
-              '''static int unusable_open(struct inode *i, struct file *f)
-          { return seq_open(f, &unusable_sops); }
-          static const struct file_operations unusable_fops = {
-            .owner = THIS_MODULE,
-            .open = unusable_open,
-            .read = seq_read,
-            .llseek = seq_lseek,
-            .release = seq_release,
-          };'''
-          )
-          c = c.replace(
-              'DEFINE_SEQ_ATTRIBUTE(extfrag);',
-              '''static int extfrag_open(struct inode *i, struct file *f)
-          { return seq_open(f, &extfrag_sops); }
-          static const struct file_operations extfrag_fops = {
-            .owner = THIS_MODULE,
-            .open = extfrag_open,
-            .read = seq_read,
-            .llseek = seq_lseek,
-            .release = seq_release,
-          };'''
-          )
+          c = c.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
+              "static int unusable_open(struct inode *i, struct file *f)"
+              " { return seq_open(f, &unusable_sops); }\n"
+              "static const struct file_operations unusable_fops = {"
+              " .owner=THIS_MODULE, .open=unusable_open, .read=seq_read,"
+              " .llseek=seq_lseek, .release=seq_release };")
+          c = c.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
+              "static int extfrag_open(struct inode *i, struct file *f)"
+              " { return seq_open(f, &extfrag_sops); }\n"
+              "static const struct file_operations extfrag_fops = {"
+              " .owner=THIS_MODULE, .open=extfrag_open, .read=seq_read,"
+              " .llseek=seq_lseek, .release=seq_release };")
           with open('mm/vmstat.c', 'w') as f:
               f.write(c)
+          print("vmstat.c OK")
 
-          # rtmutex.c
+          # Fix 2: rtmutex.c
           with open('kernel/locking/rtmutex.c', 'r') as f:
               c = f.read()
-          c = c.replace('trace_android_vh_rtmutex_wait_start(lock);', '/* stub */')
-          c = c.replace('trace_android_vh_rtmutex_wait_finish(lock);', '/* stub */')
+          c = c.replace('trace_android_vh_rtmutex_wait_start(lock);',
+                        '/* trace_android_vh_rtmutex_wait_start stubbed */')
+          c = c.replace('trace_android_vh_rtmutex_wait_finish(lock);',
+                        '/* trace_android_vh_rtmutex_wait_finish stubbed */')
           with open('kernel/locking/rtmutex.c', 'w') as f:
               f.write(c)
+          print("rtmutex.c OK")
 
-          # taskstats.c
+          # Fix 3: taskstats.c bare #elif
           with open('kernel/taskstats.c', 'r') as f:
               lines = f.readlines()
-          lines = ['#else\n' if line.strip() == '#elif' else line for line in lines]
+          lines = ['#else\n' if l.strip() == '#elif' else l for l in lines]
           with open('kernel/taskstats.c', 'w') as f:
               f.writelines(lines)
+          print("taskstats.c OK")
 
-          # fdinfo.c
+          # Fix 4: fdinfo.c missing struct file* param
           with open('fs/notify/fdinfo.c', 'r') as f:
               c = f.read()
           c = re.sub(
               r'(static void \w+\(struct seq_file \*\w+,\s*struct fsnotify_mark \*\w+\))',
               lambda m: m.group(0)[:-1] + ', struct file *__f)',
-              c
-          )
+              c)
           with open('fs/notify/fdinfo.c', 'w') as f:
               f.write(c)
+          print("fdinfo.c OK")
 
-          # qrtr/tun.c
+          # Fix 5: qrtr/tun.c missing 4th arg
           with open('net/qrtr/tun.c', 'r') as f:
               c = f.read()
           c = c.replace(
               'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0)',
-              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)'
-          )
+              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)')
           with open('net/qrtr/tun.c', 'w') as f:
               f.write(c)
+          print("qrtr/tun.c OK")
 
-          # qcom clk cleanup
+          # Fix 6: Remove broken qcom clock drivers from Makefile
           with open('drivers/clk/qcom/Makefile', 'r') as f:
               lines = f.readlines()
-          lines = [
-              l for l in lines
-              if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l
-          ]
+          lines = [l for l in lines if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l]
           with open('drivers/clk/qcom/Makefile', 'w') as f:
               f.writelines(lines)
+          print("qcom/Makefile OK")
 
-          # mac80211
+          # Fix 7: mac80211 minstrel duplicate symbols
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          c = re.sub(
-              r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
-              r'# \1',
-              c,
-              flags=re.MULTILINE
-          )
+          c = re.sub(r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
+          c = re.sub(r'^(rc80211_minstrel-y\s*:=)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
+          c = re.sub(r'^(rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
           with open('net/mac80211/Makefile', 'w') as f:
               f.write(c)
+          print("mac80211 Makefile OK")
 
-          # touchscreen fix
-          for path in glob.glob('drivers/input/touchscreen/**/*.c', recursive=True):
+          # Fix 8: FB_EARLY_EVENT_BLANK missing - patch ALL touchscreen drivers at once
+          import glob
+          ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
+          patched = 0
+          for path in ts_files:
               with open(path, 'r', errors='ignore') as f:
                   c = f.read()
               if 'FB_EARLY_EVENT_BLANK' in c and '#define FB_EARLY_EVENT_BLANK' not in c:
                   c = '#ifndef FB_EARLY_EVENT_BLANK\n#define FB_EARLY_EVENT_BLANK 0x10\n#endif\n' + c
                   with open(path, 'w') as f:
                       f.write(c)
+                  print(f"  patched: {path}")
+                  patched += 1
+          print(f"FB_EARLY_EVENT_BLANK fix applied to {patched} files OK")
 
-          # i2c-qcom-geni.c
-          path = 'drivers/i2c/busses/i2c-qcom-geni.c'
-          with open(path, 'r') as f:
+          # Fix 9: i2c-qcom-geni.c
+          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               c = f.read()
-
-          if 'static inline void geni_write_reg' not in c:
-              include_end = c.find('\n\n', c.find('#include'))
-              shim = '''
-
-          static inline void geni_write_reg(u32 val, void __iomem *base, int offset)
-          {
-              writel_relaxed(val, base + offset);
-          }
-          '''
-              c = c[:include_end] + shim + c[include_end:]
-
+          shim = (
+              '\nstatic inline void geni_write_reg(u32 val, void __iomem *base, int offset)'
+              ' { writel_relaxed(val, base + offset); }\n'
+          )
+          if 'geni_write_reg' in c and 'static inline void geni_write_reg' not in c:
+              c = shim + c
           c = c.replace('gi2c->base,', 'gi2c->se.base,')
           c = c.replace('gi2c->base +', 'gi2c->se.base +')
-
-          with open(path, 'w') as f:
+          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
               f.write(c)
+          print("i2c-qcom-geni.c OK")
 
-          # flask.h
+          # Fix 10: flask.h missing - create minimal version for KernelSU SELinux compat
           flask_path = 'security/selinux/include/flask.h'
           if not os.path.exists(flask_path):
+              print(f"flask.h missing - creating minimal version")
+              # This minimal flask.h satisfies the include without full policy
+              content = """/* Auto-generated minimal flask.h for build compatibility */
+          #ifndef _SELINUX_FLASK_H_
+          #define _SELINUX_FLASK_H_
+          #define SECCLASS_SECURITY\t\t\t 1
+          #define SECCLASS_PROCESS\t\t\t 2
+          #define SECCLASS_SYSTEM\t\t\t 3
+          #define SECCLASS_CAPABILITY\t\t\t 4
+          #define SECCLASS_FILESYSTEM\t\t\t 5
+          #define SECCLASS_FILE\t\t\t 6
+          #define SECCLASS_DIR\t\t\t 7
+          #define SECCLASS_FD\t\t\t 8
+          #define SECCLASS_LNK_FILE\t\t\t 9
+          #define SECCLASS_CHR_FILE\t\t\t 10
+          #define SECCLASS_BLK_FILE\t\t\t 11
+          #define SECCLASS_SOCK_FILE\t\t\t 12
+          #define SECCLASS_FIFO_FILE\t\t\t 13
+          #define SECCLASS_SOCKET\t\t\t 14
+          #define SECCLASS_TCP_SOCKET\t\t\t 15
+          #define SECCLASS_UDP_SOCKET\t\t\t 16
+          #define SECCLASS_RAWIP_SOCKET\t\t\t 17
+          #define SECCLASS_NODE\t\t\t 18
+          #define SECCLASS_NETIF\t\t\t 19
+          #define SECCLASS_NETLINK_SOCKET\t\t\t 20
+          #define SECCLASS_PACKET_SOCKET\t\t\t 21
+          #define SECCLASS_KEY_SOCKET\t\t\t 22
+          #define SECCLASS_UNIX_STREAM_SOCKET\t\t\t 23
+          #define SECCLASS_UNIX_DGRAM_SOCKET\t\t\t 24
+          #define SECCLASS_SEM\t\t\t 25
+          #define SECCLASS_MSG\t\t\t 26
+          #define SECCLASS_MSGQ\t\t\t 27
+          #define SECCLASS_SHM\t\t\t 28
+          #define SECCLASS_IPC\t\t\t 29
+          #define SECCLASS_NETLINK_ROUTE_SOCKET\t\t\t 30
+          #define SECCLASS_NETLINK_TCPDIAG_SOCKET\t\t\t 31
+          #define SECCLASS_NETLINK_NFLOG_SOCKET\t\t\t 32
+          #define SECCLASS_NETLINK_XFRM_SOCKET\t\t\t 33
+          #define SECCLASS_NETLINK_SELINUX_SOCKET\t\t\t 34
+          #define SECCLASS_NETLINK_AUDIT_SOCKET\t\t\t 35
+          #define SECCLASS_NETLINK_DNRT_SOCKET\t\t\t 36
+          #define SECCLASS_ASSOCIATION\t\t\t 37
+          #define SECCLASS_NETLINK_KOBJECT_UEVENT_SOCKET\t\t\t 38
+          #define SECCLASS_APPLETALK_SOCKET\t\t\t 39
+          #define SECCLASS_PACKET\t\t\t 40
+          #define SECCLASS_KEY\t\t\t 41
+          #define SECCLASS_DCCP_SOCKET\t\t\t 42
+          #define SECCLASS_MEMPROTECT\t\t\t 43
+          #define SECCLASS_PEER\t\t\t 44
+          #define SECCLASS_CAPABILITY2\t\t\t 45
+          #define SECCLASS_KERNEL_SERVICE\t\t\t 46
+          #define SECCLASS_TUN_SOCKET\t\t\t 47
+          #define SECCLASS_BINDER\t\t\t 48
+          #define SECCLASS_PROPERTY_SERVICE\t\t\t 49
+          #define SECCLASS_SERVICE_MANAGER\t\t\t 50
+          #define SECCLASS_KEYSTORE_KEY\t\t\t 51
+          #define SECCLASS_DRMSERVICE\t\t\t 52
+          #define SECINITSID_KERNEL 1
+          #define SECINITSID_SECURITY 2
+          #define SECINITSID_UNLABELED 3
+          #define SECINITSID_NUM 27
+          #endif /* _SELINUX_FLASK_H_ */
+          """
               with open(flask_path, 'w') as f:
-                  f.write(
-                      '#ifndef _SELINUX_FLASK_H_\n'
-                      '#define _SELINUX_FLASK_H_\n'
-                      '#endif\n'
-                  )
+                  f.write(content)
+              print("flask.h created OK")
+          else:
+              print("flask.h already exists OK")
 
-          print("All patches applied")
+          print("All patches done")
           PYEOF
+
+          # Disable NFS
+          for cfg in CONFIG_NFS_FS CONFIG_NFS_V2 CONFIG_NFS_V3 CONFIG_NFS_V4; do
+            sed -i "s/${cfg}=y/# ${cfg} is not set/" arch/arm64/configs/defconfig
+            sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
+          done
+          echo "NFS disabled OK"
 
       - name: Enable KernelSU and setup defconfig
         run: |
-          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' \
-            arch/arm64/configs/vendor/fogos_stock-config || true
-
-          make O=out vendor/fogos_stock-config \
+          sed -i 's/# CONFIG_KSU is not set/CONFIG_KSU=y/' arch/arm64/configs/defconfig
+          make O=out defconfig \
             ARCH=arm64 \
             CC=clang \
             LD=ld.lld \
@@ -199,9 +256,7 @@ jobs:
             STRIP=llvm-strip \
             LLVM=1 \
             LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            2>&1 | tee build.log
-
+            CROSS_COMPILE=aarch64-linux-gnu- 2>&1 | tee build.log; \
           exit ${PIPESTATUS[0]}
 
       - name: Upload kernel artifact
