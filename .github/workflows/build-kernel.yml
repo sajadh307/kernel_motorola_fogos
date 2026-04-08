@@ -38,111 +38,93 @@ jobs:
 
       - name: Patch kernel sources
         run: |
-          # Fix 1: vmstat.c
           python3 << 'PYEOF'
+          import re
+
+          # ── Fix 1: vmstat.c ──────────────────────────────────────────────
           with open('mm/vmstat.c', 'r') as f:
-              content = f.read()
-          content = content.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
-          """static int unusable_open(struct inode *inode, struct file *file)
-          { return seq_open(file, &unusable_sops); }
-          static const struct file_operations unusable_fops = {
-              .owner = THIS_MODULE, .open = unusable_open,
-              .read = seq_read, .llseek = seq_lseek, .release = seq_release,
-          };""")
-          content = content.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
-          """static int extfrag_open(struct inode *inode, struct file *file)
-          { return seq_open(file, &extfrag_sops); }
-          static const struct file_operations extfrag_fops = {
-              .owner = THIS_MODULE, .open = extfrag_open,
-              .read = seq_read, .llseek = seq_lseek, .release = seq_release,
-          };""")
+              c = f.read()
+          c = c.replace('DEFINE_SEQ_ATTRIBUTE(unusable);',
+          "static int unusable_open(struct inode *i, struct file *f) { return seq_open(f, &unusable_sops); }\n"
+          "static const struct file_operations unusable_fops = { .owner=THIS_MODULE, .open=unusable_open, .read=seq_read, .llseek=seq_lseek, .release=seq_release };")
+          c = c.replace('DEFINE_SEQ_ATTRIBUTE(extfrag);',
+          "static int extfrag_open(struct inode *i, struct file *f) { return seq_open(f, &extfrag_sops); }\n"
+          "static const struct file_operations extfrag_fops = { .owner=THIS_MODULE, .open=extfrag_open, .read=seq_read, .llseek=seq_lseek, .release=seq_release };")
           with open('mm/vmstat.c', 'w') as f:
-              f.write(content)
+              f.write(c)
           print("vmstat.c OK")
-          PYEOF
 
-          # Fix 2: rtmutex.c
-          sed -i 's/trace_android_vh_rtmutex_wait_start(lock);/\/\/ trace_android_vh_rtmutex_wait_start(lock);/' kernel/locking/rtmutex.c
-          sed -i 's/trace_android_vh_rtmutex_wait_finish(lock);/\/\/ trace_android_vh_rtmutex_wait_finish(lock);/' kernel/locking/rtmutex.c
-          echo "rtmutex.c OK"
+          # ── Fix 2: rtmutex.c ─────────────────────────────────────────────
+          with open('kernel/locking/rtmutex.c', 'r') as f:
+              c = f.read()
+          c = c.replace('trace_android_vh_rtmutex_wait_start(lock);', '/* trace_android_vh_rtmutex_wait_start stubbed */')
+          c = c.replace('trace_android_vh_rtmutex_wait_finish(lock);', '/* trace_android_vh_rtmutex_wait_finish stubbed */')
+          with open('kernel/locking/rtmutex.c', 'w') as f:
+              f.write(c)
+          print("rtmutex.c OK")
 
-          # Fix 3: taskstats.c - bare #elif
-          python3 << 'PYEOF'
+          # ── Fix 3: taskstats.c bare #elif ────────────────────────────────
           with open('kernel/taskstats.c', 'r') as f:
               lines = f.readlines()
-          fixed = ['#else\n' if l.strip() == '#elif' else l for l in lines]
+          lines = ['#else\n' if l.strip() == '#elif' else l for l in lines]
           with open('kernel/taskstats.c', 'w') as f:
-              f.writelines(fixed)
+              f.writelines(lines)
           print("taskstats.c OK")
-          PYEOF
 
-          # Fix 4: fdinfo.c - add missing struct file* param to show functions
-          python3 << 'PYEOF'
-          import re
+          # ── Fix 4: fdinfo.c missing struct file* param ───────────────────
           with open('fs/notify/fdinfo.c', 'r') as f:
-              content = f.read()
-          content = re.sub(
-              r'(static void \w+\(struct seq_file \*\w+, struct fsnotify_mark \*\w+\))',
-              lambda m: m.group(0)[:-1] + ', struct file *__unused_f)',
-              content
+              c = f.read()
+          c = re.sub(
+              r'(static void \w+\(struct seq_file \*\w+,\s*struct fsnotify_mark \*\w+\))',
+              lambda m: m.group(0)[:-1] + ', struct file *__f)',
+              c
           )
           with open('fs/notify/fdinfo.c', 'w') as f:
-              f.write(content)
+              f.write(c)
           print("fdinfo.c OK")
-          PYEOF
 
-          # Fix 5: apcs-msm8916.c - wrong pointer type, add cast
-          python3 << 'PYEOF'
+          # ── Fix 5: apcs-msm8916.c wrong pointer type ─────────────────────
           with open('drivers/clk/qcom/apcs-msm8916.c', 'r') as f:
-              content = f.read()
-          content = content.replace(
-              'const struct parent_map *',
-              'const struct parent_map *'
-          )
-          # Add cast for u32 array assigned to parent_map pointer
-          import re
-          content = re.sub(
-              r'(\.parent_map\s*=\s*)([a-zA-Z_]\w*(?:\s*\[\s*\])?)',
-              r'\1(const struct parent_map *)\2',
-              content
-          )
-          with open('drivers/clk/qcom/apcs-msm8916.c', 'w') as f:
-              f.write(content)
-          print("apcs-msm8916.c OK")
-          PYEOF
-
-          # Fix 6: qrtr/tun.c - function call missing 4th argument
-          python3 << 'PYEOF'
-          with open('net/qrtr/tun.c', 'r') as f:
               lines = f.readlines()
-          print(f"Line 47: {lines[46].rstrip()}")
-          PYEOF
+          print(f"apcs line 77: {lines[76].rstrip()}")
+          # Cast the rhs of the assignment on line 77 to the correct pointer type
+          lines[76] = re.sub(
+              r'=\s*([a-zA-Z_]\w*)',
+              r'= (const struct parent_map *)\1',
+              lines[76]
+          )
+          print(f"apcs line 77 fixed: {lines[76].rstrip()}")
+          with open('drivers/clk/qcom/apcs-msm8916.c', 'w') as f:
+              f.writelines(lines)
+          print("apcs-msm8916.c OK")
 
-          # Fix 7: mac80211 duplicate minstrel symbols - disable minstrel_ht module split
-          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=m/CONFIG_MAC80211_MINSTREL_HT=y/' arch/arm64/configs/defconfig
-          echo "Checking defconfig for minstrel..."
-          grep -i minstrel arch/arm64/configs/defconfig || echo "minstrel not in defconfig"
-
-          # Disable NFS
-          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V2=y/# CONFIG_NFS_V2 is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V3=y/# CONFIG_NFS_V3 is not set/' arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_NFS_V4=y/# CONFIG_NFS_V4 is not set/' arch/arm64/configs/defconfig
-
-      - name: Show qrtr tun.c line 47 and fix
-        run: |
-          echo "--- tun.c around line 47 ---"
-          sed -n '40,55p' net/qrtr/tun.c
-          # Fix: add NULL as 4th argument to whichever function call is on line 47
-          python3 << 'PYEOF'
+          # ── Fix 6: qrtr/tun.c missing 4th arg ───────────────────────────
           with open('net/qrtr/tun.c', 'r') as f:
-              content = f.read()
-          import re
-          # Find function calls with 3 args on that line and add a 4th NULL
-          # The exact fix depends on what function it is - we print first, then patch
-          lines = content.split('\n')
-          print(f"Line 47 content: {lines[46]}")
+              c = f.read()
+          c = c.replace(
+              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0)',
+              'qrtr_endpoint_register(&tun->ep, QRTR_EP_NET_ID_AUTO, 0, false)'
+          )
+          with open('net/qrtr/tun.c', 'w') as f:
+              f.write(c)
+          print("qrtr/tun.c OK")
+
+          print("All patches applied")
           PYEOF
+
+          # ── Fix 7: mac80211 duplicate minstrel symbols ───────────────────
+          # Disable minstrel_ht to avoid duplicate symbol link error
+          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=y/# CONFIG_MAC80211_MINSTREL_HT is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_MAC80211_MINSTREL_HT=m/# CONFIG_MAC80211_MINSTREL_HT is not set/' arch/arm64/configs/defconfig
+          echo "# CONFIG_MAC80211_MINSTREL_HT is not set" >> arch/arm64/configs/defconfig
+          echo "minstrel_ht disabled OK"
+
+          # ── Fix 8: Disable NFS ───────────────────────────────────────────
+          for cfg in CONFIG_NFS_FS CONFIG_NFS_V2 CONFIG_NFS_V3 CONFIG_NFS_V4; do
+            sed -i "s/${cfg}=y/# ${cfg} is not set/" arch/arm64/configs/defconfig
+            sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
+          done
+          echo "NFS disabled OK"
 
       - name: Enable KernelSU and setup defconfig
         run: |
