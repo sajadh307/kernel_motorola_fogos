@@ -137,10 +137,7 @@ jobs:
           # Fix 9: i2c-qcom-geni.c - insert shim after last #include
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               lines = f.readlines()
-          last_include = 0
-          for i, l in enumerate(lines):
-              if l.strip().startswith('#include'):
-                  last_include = i
+          last_include = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
           shim = (
               '\n/* compat shim */\n'
               'static inline void geni_write_reg(u32 val, void __iomem *base, int offset)\n'
@@ -190,48 +187,30 @@ jobs:
           if not os.path.exists(av_perm_path):
               with open(av_perm_path, 'w') as f:
                   f.write(
-                      '/* Auto-generated minimal av_permissions.h */\n'
-                      '#ifndef _SELINUX_AV_PERMISSIONS_H_\n'
+                      '/* Auto-generated */\n#ifndef _SELINUX_AV_PERMISSIONS_H_\n'
                       '#define _SELINUX_AV_PERMISSIONS_H_\n'
                       '#define FILE__EXECUTE      0x00000001UL\n'
                       '#define FILE__WRITE        0x00000002UL\n'
                       '#define FILE__READ         0x00000004UL\n'
                       '#define FILE__OPEN         0x00000800UL\n'
                       '#define PROCESS__FORK      0x00000001UL\n'
-                      '#define PROCESS__TRANSITION 0x00000002UL\n'
                       '#define PROCESS__PTRACE    0x00000040UL\n'
                       '#define PROCESS__EXECMEM   0x01000000UL\n'
                       '#define SECURITY__LOAD_POLICY 0x00000010UL\n'
                       '#define SECURITY__SETENFORCE  0x00000080UL\n'
-                      '#define SECURITY__READ_POLICY 0x00000800UL\n'
-                      '#endif\n'
-                  )
+                      '#endif\n')
           print("av_permissions.h OK")
 
-          # Fix 13: moto_mm/mm_main.c - stub out missing Android vendor hooks
-          mm_main = 'drivers/moto_mm/mm_main.c'
-          if os.path.exists(mm_main):
-              with open(mm_main, 'r') as f:
-                  c = f.read()
-              # Add stubs before first use if not already present
-              if 'register_trace_android_vh_tune_inactive_ratio' in c and \
-                 '#define register_trace_android_vh_tune_inactive_ratio' not in c:
-                  stubs = (
-                      '\n/* stubbed missing vendor hooks */\n'
-                      '#define register_trace_android_vh_tune_inactive_ratio(fn, NULL) (0)\n'
-                      '#define unregister_trace_android_vh_tune_inactive_ratio(fn, NULL) (0)\n\n'
-                  )
-                  # Insert after last #include
-                  lines = c.split('\n')
-                  last_inc = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
-                  lines.insert(last_inc + 1, stubs)
-                  with open(mm_main, 'w') as f:
-                      f.write('\n'.join(lines))
-                  print("moto_mm/mm_main.c stubbed OK")
-              else:
-                  print("moto_mm/mm_main.c already OK")
-          else:
-              print("moto_mm/mm_main.c not found")
+          # Fix 13: moto_mm - remove from drivers Makefile entirely
+          # These are Motorola-specific hooks not present in this kernel version
+          drv_makefile = 'drivers/Makefile'
+          with open(drv_makefile, 'r') as f:
+              lines = f.readlines()
+          before = len(lines)
+          lines = [l for l in lines if 'moto_mm' not in l]
+          with open(drv_makefile, 'w') as f:
+              f.writelines(lines)
+          print(f"drivers/Makefile: removed moto_mm ({before - len(lines)} lines) OK")
 
           print("All patches done")
           PYEOF
