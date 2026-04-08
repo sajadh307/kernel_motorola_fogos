@@ -1,4 +1,4 @@
-name: Build Motorola G45 Fogos Kernel
+name: Build Moto G45 Fogos Kernel
 
 on:
   workflow_dispatch:
@@ -23,15 +23,15 @@ jobs:
             libelf-dev libssl-dev libncurses-dev \
             python3 clang lld llvm gcc-aarch64-linux-gnu
 
-      - name: Setup Kernel Configuration
+      - name: Setup Configuration
         run: |
           mkdir -p out
-          # Using the fogos specific defconfig found in your repository
-          make O=out ARCH=arm64 vendor/fogos_defconfig
+          # This repo uses the SM6375 vendor config for the G45
+          make O=out ARCH=arm64 vendor/fogos_defconfig || make O=out ARCH=arm64 vendor/holi_defconfig
 
       - name: Compile Kernel
         run: |
-          # We use Clang and LLVM as required for modern Motorola kernels
+          # Standard LLVM/Clang build for Motorola
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -41,14 +41,14 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 2>&1 | tee build.log
           
-          # This ensures the workflow reports a failure if compilation stops
+          # Force job failure if compilation fails
           if [ ${PIPESTATUS[0]} -ne 0 ]; then exit 1; fi
 
       - name: Upload Kernel Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Motorola-G45-Kernel
+          name: Moto-G45-Fogos-Kernel
           path: |
             out/arch/arm64/boot/Image
             out/arch/arm64/boot/dtbo.img
