@@ -100,39 +100,61 @@ jobs:
               f.write(c)
           print("qrtr/tun.c OK")
 
-          # Fix 6: Remove broken non-SM6375 qcom clock drivers from Makefile
-          # gcc-qcs404 (QCS404 chip) and apcs-msm8916 (MSM8916 chip) are not
-          # needed for SM6375 and have broken/incompatible code
+          # Fix 6: Remove broken qcom clock drivers from Makefile
           with open('drivers/clk/qcom/Makefile', 'r') as f:
               lines = f.readlines()
-          before = len(lines)
           lines = [l for l in lines if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l]
-          after = len(lines)
           with open('drivers/clk/qcom/Makefile', 'w') as f:
               f.writelines(lines)
-          print(f"qcom/Makefile: removed {before-after} lines OK")
+          print("qcom/Makefile OK")
 
           # Fix 7: mac80211 minstrel duplicate symbols
-          # Remove the minstrel inclusion from mac80211 entirely
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          # Comment out the line that adds minstrel objects to mac80211
-          c = re.sub(
-              r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
-              r'# PATCHED_OUT: \1',
-              c, flags=re.MULTILINE)
-          # Also remove the rc80211_minstrel-y definition to avoid orphan objects
-          c = re.sub(
-              r'^(rc80211_minstrel-y\s*:=)',
-              r'# PATCHED_OUT: \1',
-              c, flags=re.MULTILINE)
-          c = re.sub(
-              r'^(rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=)',
-              r'# PATCHED_OUT: \1',
-              c, flags=re.MULTILINE)
+          c = re.sub(r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
+          c = re.sub(r'^(rc80211_minstrel-y\s*:=)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
+          c = re.sub(r'^(rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=)',
+                     r'# PATCHED: \1', c, flags=re.MULTILINE)
           with open('net/mac80211/Makefile', 'w') as f:
               f.write(c)
-          print("mac80211 Makefile minstrel removed OK")
+          print("mac80211 Makefile OK")
+
+          # Fix 8: cts_driver.c - FB_EARLY_EVENT_BLANK removed in newer kernels
+          with open('drivers/input/touchscreen/chipone_tddi_v2_mmi/cts_driver.c', 'r') as f:
+              c = f.read()
+          # Add define at top if not present
+          if 'FB_EARLY_EVENT_BLANK' not in c or '#define FB_EARLY_EVENT_BLANK' not in c:
+              c = '#ifndef FB_EARLY_EVENT_BLANK\n#define FB_EARLY_EVENT_BLANK 0x10\n#endif\n' + c
+          with open('drivers/input/touchscreen/chipone_tddi_v2_mmi/cts_driver.c', 'w') as f:
+              f.write(c)
+          print("cts_driver.c OK")
+
+          # Fix 9: i2c-qcom-geni.c - geni_write_reg undeclared + missing ->base member
+          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
+              c = f.read()
+          # Print context around the error for debugging
+          lines = c.split('\n')
+          print("i2c-qcom-geni.c lines 160-185:")
+          for i, l in enumerate(lines[159:185], 160):
+              print(f"  {i}: {l}")
+          # Add geni_write_reg inline shim before first use
+          shim = (
+              '\n/* compat shim: geni_write_reg removed in this kernel version */\n'
+              'static inline void geni_write_reg(u32 val, void __iomem *base, int offset)\n'
+              '{ writel_relaxed(val, base + offset); }\n\n'
+          )
+          # Insert shim before the first function that uses it
+          c = re.sub(
+              r'(static int geni_i2c_clk_map_idx)',
+              shim + r'\1',
+              c)
+          # Replace ->base with ->se.base (struct was refactored)
+          c = c.replace('gi2c->base', 'gi2c->se.base')
+          with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
+              f.write(c)
+          print("i2c-qcom-geni.c OK")
 
           print("All patches done")
           PYEOF
