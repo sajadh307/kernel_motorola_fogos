@@ -1,4 +1,4 @@
-name: Build Motorola Fogos Kernel
+name: Build Motorola G45 Fogos Kernel
 
 on:
   workflow_dispatch:
@@ -10,13 +10,12 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
-          # This points directly to your repository
-          repository: sajadh307/kernel_motorola_fogos
+          repository: prabhatkrmishra/kernel_motorola_fogos
           ref: 15.0
           fetch-depth: 1
           submodules: recursive
 
-      - name: Install Build Tools
+      - name: Install Build Dependencies
         run: |
           sudo apt update
           sudo apt install -y \
@@ -24,15 +23,15 @@ jobs:
             libelf-dev libssl-dev libncurses-dev \
             python3 clang lld llvm gcc-aarch64-linux-gnu
 
-      - name: Prepare Build Environment
+      - name: Setup Kernel Configuration
         run: |
           mkdir -p out
-          # We use the defconfig found in your logs
+          # Using the fogos specific defconfig found in your repository
           make O=out ARCH=arm64 vendor/fogos_defconfig
 
-      - name: Run Build
+      - name: Compile Kernel
         run: |
-          # We use LLVM=1 to ensure we use Clang/LLD properly
+          # We use Clang and LLVM as required for modern Motorola kernels
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -42,14 +41,14 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 2>&1 | tee build.log
           
-          # This ensures the workflow fails if the make command fails
+          # This ensures the workflow reports a failure if compilation stops
           if [ ${PIPESTATUS[0]} -ne 0 ]; then exit 1; fi
 
-      - name: Upload Logs & Kernel
+      - name: Upload Kernel Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Fogos-Kernel-Output
+          name: Motorola-G45-Kernel
           path: |
             out/arch/arm64/boot/Image
             out/arch/arm64/boot/dtbo.img
