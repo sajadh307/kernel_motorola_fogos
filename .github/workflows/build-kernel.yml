@@ -10,11 +10,13 @@ jobs:
       - name: Checkout Kernel Source
         uses: actions/checkout@v4
         with:
+          # This points directly to your repository
           repository: sajadh307/kernel_motorola_fogos
           ref: 15.0
           fetch-depth: 1
+          submodules: recursive
 
-      - name: Install Dependencies
+      - name: Install Build Tools
         run: |
           sudo apt update
           sudo apt install -y \
@@ -22,31 +24,15 @@ jobs:
             libelf-dev libssl-dev libncurses-dev \
             python3 clang lld llvm gcc-aarch64-linux-gnu
 
-      - name: Fix vmstat.c Error
-        run: |
-          # The previous script was creating a broken C file. 
-          # This version uses proper headers required by the kernel.
-          cat <<EOF > mm/vmstat.c
-          #include <linux/mm.h>
-          #include <linux/module.h>
-          #include <linux/vmstat.h>
-          #include <linux/proc_fs.h>
-          #include <linux/seq_file.h>
-
-          /* Minimal working vmstat for compilation */
-          void __init proc_vmstat_init(void) {
-              proc_create_seq("vmstat", 0444, NULL, &vmstat_op);
-          }
-          EOF
-          echo "Fixed mm/vmstat.c formatting"
-
-      - name: Setup Kernel Config
+      - name: Prepare Build Environment
         run: |
           mkdir -p out
+          # We use the defconfig found in your logs
           make O=out ARCH=arm64 vendor/fogos_defconfig
 
-      - name: Compile Kernel
+      - name: Run Build
         run: |
+          # We use LLVM=1 to ensure we use Clang/LLD properly
           make -j$(nproc --all) O=out \
             ARCH=arm64 \
             CC=clang \
@@ -55,12 +41,15 @@ jobs:
             LD=ld.lld \
             LLVM=1 \
             LLVM_IAS=1 2>&1 | tee build.log
+          
+          # This ensures the workflow fails if the make command fails
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then exit 1; fi
 
-      - name: Upload Kernel
+      - name: Upload Logs & Kernel
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Fogos-Kernel-Image
+          name: Fogos-Kernel-Output
           path: |
             out/arch/arm64/boot/Image
             out/arch/arm64/boot/dtbo.img
