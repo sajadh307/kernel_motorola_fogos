@@ -1,19 +1,7 @@
 name: Build KernelSU Kernel for Moto G45 (fogos)
-
-on:
-push:
-branches:
-- main
-workflow_dispatch:
-
-env:
-ARCH: arm64
-SUBARCH: arm64
-
-jobs:
-build:
-runs-on: ubuntu-latest
-
+on: push: branches: - main workflow_dispatch:
+env: ARCH: arm64 SUBARCH: arm64
+jobs: build: runs-on: ubuntu-latest
 steps:
   - name: Checkout kernel source
     uses: actions/checkout@v4
@@ -123,15 +111,8 @@ steps:
       if 'static inline void geni_write_reg' not in c:
           include_end = c.find('\n\n', c.find('#include'))
           shim = '''
-
-static inline void geni_write_reg(u32 val, void __iomem *base, int offset)
-{
-writel_relaxed(val, base + offset);
-}
-'''
-c = c[:include_end] + shim + c[include_end:]
-
-      c = c.replace('gi2c->base,', 'gi2c->se.base,')
+static inline void geni_write_reg(u32 val, void __iomem *base, int offset) { writel_relaxed(val, base + offset); } ''' c = c[:include_end] + shim + c[include_end:]
+c = c.replace('gi2c->base,', 'gi2c->se.base,')
       c = c.replace('gi2c->base +', 'gi2c->se.base +')
 
       with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
