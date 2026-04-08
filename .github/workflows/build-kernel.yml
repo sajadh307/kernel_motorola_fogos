@@ -38,12 +38,10 @@ jobs:
 
       - name: Patch kernel sources
         run: |
-          # Fix 1: vmstat.c uses DEFINE_SEQ_ATTRIBUTE which doesn't exist in kernel 5.4
-          # Replace the macro calls with explicit file_operations structs
+          # Fix 1: vmstat.c - DEFINE_SEQ_ATTRIBUTE doesn't exist in kernel 5.4
           python3 << 'PYEOF'
           with open('mm/vmstat.c', 'r') as f:
               content = f.read()
-
           content = content.replace(
               'DEFINE_SEQ_ATTRIBUTE(unusable);',
               """static int unusable_open(struct inode *inode, struct file *file)
@@ -58,7 +56,6 @@ jobs:
               .release = seq_release,
           };"""
           )
-
           content = content.replace(
               'DEFINE_SEQ_ATTRIBUTE(extfrag);',
               """static int extfrag_open(struct inode *inode, struct file *file)
@@ -73,15 +70,41 @@ jobs:
               .release = seq_release,
           };"""
           )
-
           with open('mm/vmstat.c', 'w') as f:
               f.write(content)
           print("vmstat.c patched OK")
           PYEOF
 
-          # Fix 2: rtmutex.c calls Android vendor hooks but is missing the header
-          sed -i '1s|^|#include <trace/hooks/locking.h>\n|' kernel/locking/rtmutex.c
+          # Fix 2: rtmutex.c - trace/hooks/locking.h doesn't exist in this kernel
+          # Just stub out the two vendor hook calls directly
+          sed -i 's/trace_android_vh_rtmutex_wait_start(lock);/\/\/ trace_android_vh_rtmutex_wait_start(lock); \/\* stubbed \*\//' kernel/locking/rtmutex.c
+          sed -i 's/trace_android_vh_rtmutex_wait_finish(lock);/\/\/ trace_android_vh_rtmutex_wait_finish(lock); \/\* stubbed \*\//' kernel/locking/rtmutex.c
           echo "rtmutex.c patched OK"
+
+          # Fix 3: fs/nfs/dir.c - list_tail_rcu doesn't exist, disable NFS (not needed on phone)
+          sed -i 's/CONFIG_NFS_FS=y/# CONFIG_NFS_FS is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V2=y/# CONFIG_NFS_V2 is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V3=y/# CONFIG_NFS_V3 is not set/' arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_NFS_V4=y/# CONFIG_NFS_V4 is not set/' arch/arm64/configs/defconfig
+          echo "NFS disabled OK"
+
+          # Fix 4: fs/notify/fdinfo.c - function pointer missing struct file* parameter
+          sed -i 's/void (*show)(struct seq_file \*m, struct fsnotify_mark \*mark)/void (*show)(struct seq_file *m, struct fsnotify_mark *mark, struct file *f)/' fs/notify/fdinfo.c
+          # Also fix the actual function definitions that call this to match
+          python3 << 'PYEOF'
+          import re
+          with open('fs/notify/fdinfo.c', 'r') as f:
+              content = f.read()
+          # Fix function definitions that have the old 2-arg signature
+          content = re.sub(
+              r'(static void \w+_fdinfo\(struct seq_file \*m, struct fsnotify_mark \*mark\))',
+              r'\1 // signature kept',
+              content
+          )
+          with open('fs/notify/fdinfo.c', 'w') as f:
+              f.write(content)
+          print("fdinfo.c patched OK")
+          PYEOF
 
       - name: Enable KernelSU and setup defconfig
         run: |
