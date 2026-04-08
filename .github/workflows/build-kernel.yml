@@ -166,11 +166,9 @@ jobs:
                           "#define SECCLASS_FILE 4\n#define SECINITSID_KERNEL 1\n"
                           "#define SECINITSID_UNLABELED 3\n#define SECINITSID_NUM 27\n"
                           "#endif\n")
-              print("flask.h created OK")
-          else:
-              print("flask.h exists OK")
+          print("flask.h OK")
 
-          # Fix 11: sidtab.h - CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS not defined
+          # Fix 11: sidtab.h
           sidtab_path = 'security/selinux/ss/sidtab.h'
           if os.path.exists(sidtab_path):
               with open(sidtab_path, 'r') as f:
@@ -181,17 +179,13 @@ jobs:
                            '#define CONFIG_SECURITY_SELINUX_SIDTAB_HASH_BITS 9\n'
                            '#endif\n')
                   lines = c.split('\n')
-                  last_inc = 0
-                  for i, l in enumerate(lines):
-                      if l.strip().startswith('#include'):
-                          last_inc = i
+                  last_inc = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
                   lines.insert(last_inc + 1, guard)
                   with open(sidtab_path, 'w') as f:
                       f.write('\n'.join(lines))
-              print("sidtab.h OK")
+          print("sidtab.h OK")
 
-          # Fix 12: av_permissions.h missing - KernelSU needs this SELinux generated header
-          # avc.h includes it, create a minimal stub
+          # Fix 12: av_permissions.h
           av_perm_path = 'security/selinux/include/av_permissions.h'
           if not os.path.exists(av_perm_path):
               with open(av_perm_path, 'w') as f:
@@ -199,69 +193,45 @@ jobs:
                       '/* Auto-generated minimal av_permissions.h */\n'
                       '#ifndef _SELINUX_AV_PERMISSIONS_H_\n'
                       '#define _SELINUX_AV_PERMISSIONS_H_\n'
-                      '/* Common file permissions */\n'
-                      '#define FILE__EXECUTE                             0x00000001UL\n'
-                      '#define FILE__WRITE                               0x00000002UL\n'
-                      '#define FILE__READ                                0x00000004UL\n'
-                      '#define FILE__GETATTR                             0x00000008UL\n'
-                      '#define FILE__SETATTR                             0x00000010UL\n'
-                      '#define FILE__APPEND                              0x00000020UL\n'
-                      '#define FILE__UNLINK                              0x00000040UL\n'
-                      '#define FILE__LINK                                0x00000080UL\n'
-                      '#define FILE__RENAME                              0x00000100UL\n'
-                      '#define FILE__EXECUTE_NO_TRANS                    0x00000200UL\n'
-                      '#define FILE__ENTRYPOINT                          0x00000400UL\n'
-                      '#define FILE__OPEN                                0x00000800UL\n'
-                      '/* Process permissions */\n'
-                      '#define PROCESS__FORK                             0x00000001UL\n'
-                      '#define PROCESS__TRANSITION                       0x00000002UL\n'
-                      '#define PROCESS__SIGCHLD                          0x00000004UL\n'
-                      '#define PROCESS__SIGKILL                          0x00000008UL\n'
-                      '#define PROCESS__SIGSTOP                          0x00000010UL\n'
-                      '#define PROCESS__SIGNAL                           0x00000020UL\n'
-                      '#define PROCESS__PTRACE                           0x00000040UL\n'
-                      '#define PROCESS__GETSCHED                         0x00000080UL\n'
-                      '#define PROCESS__SETSCHED                         0x00000100UL\n'
-                      '#define PROCESS__GETSESSION                       0x00000200UL\n'
-                      '#define PROCESS__GETPGID                          0x00000400UL\n'
-                      '#define PROCESS__SETPGID                          0x00000800UL\n'
-                      '#define PROCESS__GETCAP                           0x00001000UL\n'
-                      '#define PROCESS__SETCAP                           0x00002000UL\n'
-                      '#define PROCESS__SHARE                            0x00004000UL\n'
-                      '#define PROCESS__GETATTR                          0x00008000UL\n'
-                      '#define PROCESS__SETEXEC                          0x00010000UL\n'
-                      '#define PROCESS__SETFSCREATE                      0x00020000UL\n'
-                      '#define PROCESS__NOATSECURE                       0x00040000UL\n'
-                      '#define PROCESS__SIGINH                           0x00080000UL\n'
-                      '#define PROCESS__SETRLIMIT                        0x00100000UL\n'
-                      '#define PROCESS__RLIMITINH                        0x00200000UL\n'
-                      '#define PROCESS__DYNTRANSITION                    0x00400000UL\n'
-                      '#define PROCESS__SETCURRENT                       0x00800000UL\n'
-                      '#define PROCESS__EXECMEM                          0x01000000UL\n'
-                      '#define PROCESS__EXECSTACK                        0x02000000UL\n'
-                      '#define PROCESS__EXECHEAP                         0x04000000UL\n'
-                      '#define PROCESS__SETKEYCREATE                     0x08000000UL\n'
-                      '#define PROCESS__SETSOCKCREATE                    0x10000000UL\n'
-                      '#define PROCESS__GETRLIMIT                        0x20000000UL\n'
-                      '/* Security permissions */\n'
-                      '#define SECURITY__COMPUTE_AV                      0x00000001UL\n'
-                      '#define SECURITY__COMPUTE_CREATE                  0x00000002UL\n'
-                      '#define SECURITY__COMPUTE_MEMBER                  0x00000004UL\n'
-                      '#define SECURITY__CHECK_CONTEXT                   0x00000008UL\n'
-                      '#define SECURITY__LOAD_POLICY                     0x00000010UL\n'
-                      '#define SECURITY__COMPUTE_RELABEL                 0x00000020UL\n'
-                      '#define SECURITY__COMPUTE_USER                    0x00000040UL\n'
-                      '#define SECURITY__SETENFORCE                      0x00000080UL\n'
-                      '#define SECURITY__SETBOOL                         0x00000100UL\n'
-                      '#define SECURITY__SETSECPARAM                     0x00000200UL\n'
-                      '#define SECURITY__SETCHECKREQPROT                 0x00000400UL\n'
-                      '#define SECURITY__READ_POLICY                     0x00000800UL\n'
-                      '#define SECURITY__VALIDATE_TRANS                  0x00001000UL\n'
-                      '#endif /* _SELINUX_AV_PERMISSIONS_H_ */\n'
+                      '#define FILE__EXECUTE      0x00000001UL\n'
+                      '#define FILE__WRITE        0x00000002UL\n'
+                      '#define FILE__READ         0x00000004UL\n'
+                      '#define FILE__OPEN         0x00000800UL\n'
+                      '#define PROCESS__FORK      0x00000001UL\n'
+                      '#define PROCESS__TRANSITION 0x00000002UL\n'
+                      '#define PROCESS__PTRACE    0x00000040UL\n'
+                      '#define PROCESS__EXECMEM   0x01000000UL\n'
+                      '#define SECURITY__LOAD_POLICY 0x00000010UL\n'
+                      '#define SECURITY__SETENFORCE  0x00000080UL\n'
+                      '#define SECURITY__READ_POLICY 0x00000800UL\n'
+                      '#endif\n'
                   )
-              print("av_permissions.h created OK")
+          print("av_permissions.h OK")
+
+          # Fix 13: moto_mm/mm_main.c - stub out missing Android vendor hooks
+          mm_main = 'drivers/moto_mm/mm_main.c'
+          if os.path.exists(mm_main):
+              with open(mm_main, 'r') as f:
+                  c = f.read()
+              # Add stubs before first use if not already present
+              if 'register_trace_android_vh_tune_inactive_ratio' in c and \
+                 '#define register_trace_android_vh_tune_inactive_ratio' not in c:
+                  stubs = (
+                      '\n/* stubbed missing vendor hooks */\n'
+                      '#define register_trace_android_vh_tune_inactive_ratio(fn, NULL) (0)\n'
+                      '#define unregister_trace_android_vh_tune_inactive_ratio(fn, NULL) (0)\n\n'
+                  )
+                  # Insert after last #include
+                  lines = c.split('\n')
+                  last_inc = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
+                  lines.insert(last_inc + 1, stubs)
+                  with open(mm_main, 'w') as f:
+                      f.write('\n'.join(lines))
+                  print("moto_mm/mm_main.c stubbed OK")
+              else:
+                  print("moto_mm/mm_main.c already OK")
           else:
-              print("av_permissions.h exists OK")
+              print("moto_mm/mm_main.c not found")
 
           print("All patches done")
           PYEOF
