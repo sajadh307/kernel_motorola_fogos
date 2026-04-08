@@ -39,7 +39,7 @@ jobs:
       - name: Patch kernel sources
         run: |
           python3 << 'PYEOF'
-          import re
+          import re, os
 
           # Fix 1: vmstat.c
           with open('mm/vmstat.c', 'r') as f:
@@ -121,40 +121,107 @@ jobs:
               f.write(c)
           print("mac80211 Makefile OK")
 
-          # Fix 8: cts_driver.c - FB_EARLY_EVENT_BLANK removed in newer kernels
-          with open('drivers/input/touchscreen/chipone_tddi_v2_mmi/cts_driver.c', 'r') as f:
-              c = f.read()
-          # Add define at top if not present
-          if 'FB_EARLY_EVENT_BLANK' not in c or '#define FB_EARLY_EVENT_BLANK' not in c:
-              c = '#ifndef FB_EARLY_EVENT_BLANK\n#define FB_EARLY_EVENT_BLANK 0x10\n#endif\n' + c
-          with open('drivers/input/touchscreen/chipone_tddi_v2_mmi/cts_driver.c', 'w') as f:
-              f.write(c)
-          print("cts_driver.c OK")
+          # Fix 8: FB_EARLY_EVENT_BLANK missing - patch ALL touchscreen drivers at once
+          import glob
+          ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
+          patched = 0
+          for path in ts_files:
+              with open(path, 'r', errors='ignore') as f:
+                  c = f.read()
+              if 'FB_EARLY_EVENT_BLANK' in c and '#define FB_EARLY_EVENT_BLANK' not in c:
+                  c = '#ifndef FB_EARLY_EVENT_BLANK\n#define FB_EARLY_EVENT_BLANK 0x10\n#endif\n' + c
+                  with open(path, 'w') as f:
+                      f.write(c)
+                  print(f"  patched: {path}")
+                  patched += 1
+          print(f"FB_EARLY_EVENT_BLANK fix applied to {patched} files OK")
 
-          # Fix 9: i2c-qcom-geni.c - geni_write_reg undeclared + missing ->base member
+          # Fix 9: i2c-qcom-geni.c
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               c = f.read()
-          # Print context around the error for debugging
-          lines = c.split('\n')
-          print("i2c-qcom-geni.c lines 160-185:")
-          for i, l in enumerate(lines[159:185], 160):
-              print(f"  {i}: {l}")
-          # Add geni_write_reg inline shim before first use
           shim = (
-              '\n/* compat shim: geni_write_reg removed in this kernel version */\n'
-              'static inline void geni_write_reg(u32 val, void __iomem *base, int offset)\n'
-              '{ writel_relaxed(val, base + offset); }\n\n'
+              '\nstatic inline void geni_write_reg(u32 val, void __iomem *base, int offset)'
+              ' { writel_relaxed(val, base + offset); }\n'
           )
-          # Insert shim before the first function that uses it
-          c = re.sub(
-              r'(static int geni_i2c_clk_map_idx)',
-              shim + r'\1',
-              c)
-          # Replace ->base with ->se.base (struct was refactored)
-          c = c.replace('gi2c->base', 'gi2c->se.base')
+          if 'geni_write_reg' in c and 'static inline void geni_write_reg' not in c:
+              c = shim + c
+          c = c.replace('gi2c->base,', 'gi2c->se.base,')
+          c = c.replace('gi2c->base +', 'gi2c->se.base +')
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'w') as f:
               f.write(c)
           print("i2c-qcom-geni.c OK")
+
+          # Fix 10: flask.h missing - create minimal version for KernelSU SELinux compat
+          flask_path = 'security/selinux/include/flask.h'
+          if not os.path.exists(flask_path):
+              print(f"flask.h missing - creating minimal version")
+              # This minimal flask.h satisfies the include without full policy
+              content = """/* Auto-generated minimal flask.h for build compatibility */
+          #ifndef _SELINUX_FLASK_H_
+          #define _SELINUX_FLASK_H_
+          #define SECCLASS_SECURITY\t\t\t 1
+          #define SECCLASS_PROCESS\t\t\t 2
+          #define SECCLASS_SYSTEM\t\t\t 3
+          #define SECCLASS_CAPABILITY\t\t\t 4
+          #define SECCLASS_FILESYSTEM\t\t\t 5
+          #define SECCLASS_FILE\t\t\t 6
+          #define SECCLASS_DIR\t\t\t 7
+          #define SECCLASS_FD\t\t\t 8
+          #define SECCLASS_LNK_FILE\t\t\t 9
+          #define SECCLASS_CHR_FILE\t\t\t 10
+          #define SECCLASS_BLK_FILE\t\t\t 11
+          #define SECCLASS_SOCK_FILE\t\t\t 12
+          #define SECCLASS_FIFO_FILE\t\t\t 13
+          #define SECCLASS_SOCKET\t\t\t 14
+          #define SECCLASS_TCP_SOCKET\t\t\t 15
+          #define SECCLASS_UDP_SOCKET\t\t\t 16
+          #define SECCLASS_RAWIP_SOCKET\t\t\t 17
+          #define SECCLASS_NODE\t\t\t 18
+          #define SECCLASS_NETIF\t\t\t 19
+          #define SECCLASS_NETLINK_SOCKET\t\t\t 20
+          #define SECCLASS_PACKET_SOCKET\t\t\t 21
+          #define SECCLASS_KEY_SOCKET\t\t\t 22
+          #define SECCLASS_UNIX_STREAM_SOCKET\t\t\t 23
+          #define SECCLASS_UNIX_DGRAM_SOCKET\t\t\t 24
+          #define SECCLASS_SEM\t\t\t 25
+          #define SECCLASS_MSG\t\t\t 26
+          #define SECCLASS_MSGQ\t\t\t 27
+          #define SECCLASS_SHM\t\t\t 28
+          #define SECCLASS_IPC\t\t\t 29
+          #define SECCLASS_NETLINK_ROUTE_SOCKET\t\t\t 30
+          #define SECCLASS_NETLINK_TCPDIAG_SOCKET\t\t\t 31
+          #define SECCLASS_NETLINK_NFLOG_SOCKET\t\t\t 32
+          #define SECCLASS_NETLINK_XFRM_SOCKET\t\t\t 33
+          #define SECCLASS_NETLINK_SELINUX_SOCKET\t\t\t 34
+          #define SECCLASS_NETLINK_AUDIT_SOCKET\t\t\t 35
+          #define SECCLASS_NETLINK_DNRT_SOCKET\t\t\t 36
+          #define SECCLASS_ASSOCIATION\t\t\t 37
+          #define SECCLASS_NETLINK_KOBJECT_UEVENT_SOCKET\t\t\t 38
+          #define SECCLASS_APPLETALK_SOCKET\t\t\t 39
+          #define SECCLASS_PACKET\t\t\t 40
+          #define SECCLASS_KEY\t\t\t 41
+          #define SECCLASS_DCCP_SOCKET\t\t\t 42
+          #define SECCLASS_MEMPROTECT\t\t\t 43
+          #define SECCLASS_PEER\t\t\t 44
+          #define SECCLASS_CAPABILITY2\t\t\t 45
+          #define SECCLASS_KERNEL_SERVICE\t\t\t 46
+          #define SECCLASS_TUN_SOCKET\t\t\t 47
+          #define SECCLASS_BINDER\t\t\t 48
+          #define SECCLASS_PROPERTY_SERVICE\t\t\t 49
+          #define SECCLASS_SERVICE_MANAGER\t\t\t 50
+          #define SECCLASS_KEYSTORE_KEY\t\t\t 51
+          #define SECCLASS_DRMSERVICE\t\t\t 52
+          #define SECINITSID_KERNEL 1
+          #define SECINITSID_SECURITY 2
+          #define SECINITSID_UNLABELED 3
+          #define SECINITSID_NUM 27
+          #endif /* _SELINUX_FLASK_H_ */
+          """
+              with open(flask_path, 'w') as f:
+                  f.write(content)
+              print("flask.h created OK")
+          else:
+              print("flask.h already exists OK")
 
           print("All patches done")
           PYEOF
