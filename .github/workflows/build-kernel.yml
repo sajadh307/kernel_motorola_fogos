@@ -209,7 +209,33 @@ jobs:
           lines = [l for l in lines if 'moto_mm' not in l and 'moto_swap' not in l]
           with open(drv_makefile, 'w') as f:
               f.writelines(lines)
-          print(f"drivers/Makefile: removed moto drivers ({before - len(lines)} lines) OK")
+          print(f"drivers/Makefile moto drivers removed OK")
+
+          # Fix 14: mmi-smbcharger-iio - missing usbpd functions
+          # Remove from power Makefile - Moto charger driver not needed for kernel boot
+          power_mk = 'drivers/power/Makefile'
+          if os.path.exists(power_mk):
+              with open(power_mk, 'r') as f:
+                  lines = f.readlines()
+              before = len(lines)
+              lines = [l for l in lines if 'mmi-smbcharger' not in l]
+              with open(power_mk, 'w') as f:
+                  f.writelines(lines)
+              print(f"drivers/power/Makefile: removed mmi-smbcharger ({before-len(lines)} lines) OK")
+
+          # Fix 15: stmmac_main.c - prev_len and sec_len undeclared
+          # Remove stmmac from net ethernet Makefile - not used on SM6375
+          stmmac_mk = 'drivers/net/ethernet/stmicro/stmmac/Makefile'
+          if os.path.exists(stmmac_mk):
+              # Disable by removing stmmac from parent Makefile
+              stmicro_mk = 'drivers/net/ethernet/stmicro/Makefile'
+              if os.path.exists(stmicro_mk):
+                  with open(stmicro_mk, 'r') as f:
+                      lines = f.readlines()
+                  lines = [l for l in lines if 'stmmac' not in l]
+                  with open(stmicro_mk, 'w') as f:
+                      f.writelines(lines)
+                  print("stmicro/Makefile: stmmac removed OK")
 
           print("All patches done")
           PYEOF
