@@ -201,16 +201,15 @@ jobs:
                       '#endif\n')
           print("av_permissions.h OK")
 
-          # Fix 13: moto_mm - remove from drivers Makefile entirely
-          # These are Motorola-specific hooks not present in this kernel version
+          # Fix 13: Remove broken Motorola-specific drivers from drivers/Makefile
           drv_makefile = 'drivers/Makefile'
           with open(drv_makefile, 'r') as f:
               lines = f.readlines()
           before = len(lines)
-          lines = [l for l in lines if 'moto_mm' not in l]
+          lines = [l for l in lines if 'moto_mm' not in l and 'moto_swap' not in l]
           with open(drv_makefile, 'w') as f:
               f.writelines(lines)
-          print(f"drivers/Makefile: removed moto_mm ({before - len(lines)} lines) OK")
+          print(f"drivers/Makefile: removed moto drivers ({before - len(lines)} lines) OK")
 
           print("All patches done")
           PYEOF
