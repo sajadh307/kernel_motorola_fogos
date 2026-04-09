@@ -230,22 +230,18 @@ jobs:
                   f.writelines(lines)
               print("stmicro/Makefile stmmac removed OK")
 
-          # Fix 16: mdt_loader.c - 'dev' undeclared at line 96
-          # This is a real QCOM driver needed for firmware - patch the source
+          # Fix 16: mdt_loader.c - replace dev_err(dev,...) with pr_err(...)
+          # Function has no 'dev' parameter in this kernel version
           mdt_path = 'drivers/soc/qcom/mdt_loader.c'
           with open(mdt_path, 'r') as f:
-              lines = f.readlines()
-          # Print lines around 96 for context
-          print("mdt_loader.c lines 88-105:")
-          for i, l in enumerate(lines[87:105], 88):
-              print(f"  {i}: {l.rstrip()}")
-          # The fix: find the function containing line 96 and check what
-          # variable name it uses for the device pointer
-          # Common pattern: the function param may be named differently
-          # We'll do a targeted fix after seeing the context
+              c = f.read()
+          c = re.sub(r'dev_err\(dev,\s*', 'pr_err(', c)
+          c = re.sub(r'dev_warn\(dev,\s*', 'pr_warn(', c)
+          c = re.sub(r'dev_info\(dev,\s*', 'pr_info(', c)
+          c = re.sub(r'dev_dbg\(dev,\s*', 'pr_debug(', c)
           with open(mdt_path, 'w') as f:
-              f.writelines(lines)
-          print("mdt_loader.c context printed - will fix next run if needed")
+              f.write(c)
+          print("mdt_loader.c OK")
 
           print("All patches done")
           PYEOF
