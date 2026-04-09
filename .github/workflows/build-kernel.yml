@@ -36,6 +36,20 @@ jobs:
           echo "LLVM=1" >> $GITHUB_ENV
           echo "LLVM_IAS=1" >> $GITHUB_ENV
 
+      - name: Apply SuSFS patches
+        run: |
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4 susfs4ksu
+
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
+          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/ 2>/dev/null || true
+
+          patch -p1 < susfs4ksu/kernel_patches/add_susfs_in_fs-5.4.patch || true
+          patch -p1 < susfs4ksu/kernel_patches/add_susfs_in_kernel-5.4.patch || true
+
+          echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
+          echo "SuSFS patches applied OK"
+
       - name: Patch kernel sources
         run: |
           python3 << 'PYEOF'
@@ -100,7 +114,7 @@ jobs:
               f.write(c)
           print("qrtr/tun.c OK")
 
-          # Fix 6: Remove broken qcom clock drivers from Makefile
+          # Fix 6: Remove broken qcom clock drivers
           with open('drivers/clk/qcom/Makefile', 'r') as f:
               lines = f.readlines()
           lines = [l for l in lines if 'gcc-qcs404' not in l and 'apcs-msm8916' not in l]
@@ -108,7 +122,7 @@ jobs:
               f.writelines(lines)
           print("qcom/Makefile OK")
 
-          # Fix 7: mac80211 minstrel duplicate symbols
+          # Fix 7: mac80211 minstrel
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
           c = re.sub(r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
@@ -121,7 +135,7 @@ jobs:
               f.write(c)
           print("mac80211 Makefile OK")
 
-          # Fix 8: FB_EARLY_EVENT_BLANK - patch all touchscreen drivers
+          # Fix 8: FB_EARLY_EVENT_BLANK
           ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
           patched = 0
           for path in ts_files:
@@ -134,7 +148,7 @@ jobs:
                   patched += 1
           print(f"FB_EARLY_EVENT_BLANK fix applied to {patched} files OK")
 
-          # Fix 9: i2c-qcom-geni.c - insert shim after last #include
+          # Fix 9: i2c-qcom-geni.c
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               lines = f.readlines()
           last_include = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
@@ -201,14 +215,14 @@ jobs:
                       '#endif\n')
           print("av_permissions.h OK")
 
-          # Fix 13: Remove broken Motorola-specific drivers
+          # Fix 13: Remove broken Motorola drivers
           drv_makefile = 'drivers/Makefile'
           with open(drv_makefile, 'r') as f:
               lines = f.readlines()
           lines = [l for l in lines if 'moto_mm' not in l and 'moto_swap' not in l]
           with open(drv_makefile, 'w') as f:
               f.writelines(lines)
-          print("drivers/Makefile moto drivers removed OK")
+          print("drivers/Makefile moto removed OK")
 
           # Fix 14: mmi-smbcharger-iio
           power_mk = 'drivers/power/Makefile'
@@ -218,7 +232,7 @@ jobs:
               lines = [l for l in lines if 'mmi-smbcharger' not in l]
               with open(power_mk, 'w') as f:
                   f.writelines(lines)
-              print("drivers/power/Makefile mmi-smbcharger removed OK")
+              print("power/Makefile mmi-smbcharger removed OK")
 
           # Fix 15: stmmac
           stmicro_mk = 'drivers/net/ethernet/stmicro/Makefile'
@@ -228,10 +242,9 @@ jobs:
               lines = [l for l in lines if 'stmmac' not in l]
               with open(stmicro_mk, 'w') as f:
                   f.writelines(lines)
-              print("stmicro/Makefile stmmac removed OK")
+              print("stmicro stmmac removed OK")
 
-          # Fix 16: mdt_loader.c - replace dev_err(dev,...) with pr_err(...)
-          # Function has no 'dev' parameter in this kernel version
+          # Fix 16: mdt_loader.c
           mdt_path = 'drivers/soc/qcom/mdt_loader.c'
           with open(mdt_path, 'r') as f:
               c = f.read()
@@ -243,6 +256,27 @@ jobs:
               f.write(c)
           print("mdt_loader.c OK")
 
+          # Fix 17: Find and remove aw_* symbol callers
+          for path in glob.glob('drivers/**/*.c', recursive=True) + \
+                      glob.glob('sound/**/*.c', recursive=True):
+              try:
+                  with open(path, 'r', errors='ignore') as f:
+                      c = f.read()
+                  if 'aw_send_afe_cal_apr' in c or 'aw_adm_param_enable' in c:
+                      fname = os.path.basename(path).replace('.c', '')
+                      mk = os.path.join(os.path.dirname(path), 'Makefile')
+                      if os.path.exists(mk):
+                          with open(mk, 'r') as f:
+                              lines = f.readlines()
+                          new = [l for l in lines if fname not in l]
+                          if len(new) != len(lines):
+                              with open(mk, 'w') as f:
+                                  f.writelines(new)
+                              print(f"aw_* caller removed: {fname}")
+              except:
+                  pass
+          print("aw_* callers handled OK")
+
           print("All patches done")
           PYEOF
 
@@ -251,7 +285,23 @@ jobs:
             sed -i "s/${cfg}=y/# ${cfg} is not set/" arch/arm64/configs/defconfig
             sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
           done
-          echo "NFS disabled OK"
+
+          # Linker symbol fixes
+          echo "CONFIG_QCOM_QMI_HELPERS=y" >> arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_QCOM_SCM=m/CONFIG_QCOM_SCM=y/' arch/arm64/configs/defconfig
+          echo "CONFIG_QCOM_SCM=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_DRM_PANEL_NOTIFIER=y" >> arch/arm64/configs/defconfig
+
+          # Enable SuSFS
+          echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_KSTAT=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_OVERLAYFS=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/defconfig
+          echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/defconfig
+          echo "SuSFS configs enabled OK"
 
       - name: Enable KernelSU and setup defconfig
         run: |
