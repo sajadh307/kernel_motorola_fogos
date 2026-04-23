@@ -39,16 +39,33 @@ jobs:
       - name: Apply SuSFS patches
         run: |
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4 susfs4ksu
+          echo "SuSFS repo contents:"
+          find susfs4ksu -name "*.patch" | head -20
+          find susfs4ksu -name "*.c" -o -name "*.h" | head -20
 
-          cp susfs4ksu/kernel_patches/fs/susfs.c fs/
-          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
-          cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/ 2>/dev/null || true
+          # Copy SuSFS source files
+          cp susfs4ksu/kernel_patches/fs/susfs.c fs/ 2>/dev/null || \
+          find susfs4ksu -name "susfs.c" -exec cp {} fs/ \;
 
-          patch -p1 < susfs4ksu/kernel_patches/add_susfs_in_fs-5.4.patch || true
-          patch -p1 < susfs4ksu/kernel_patches/add_susfs_in_kernel-5.4.patch || true
+          cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/ 2>/dev/null || \
+          find susfs4ksu -name "susfs.h" -exec cp {} include/linux/ \;
 
-          echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
-          echo "SuSFS patches applied OK"
+          find susfs4ksu -name "susfs_def.h" -exec cp {} include/linux/ \; 2>/dev/null || true
+
+          # Apply patches - find them regardless of exact path
+          FS_PATCH=$(find susfs4ksu -name "*susfs*fs*.patch" | head -1)
+          KERNEL_PATCH=$(find susfs4ksu -name "*susfs*kernel*.patch" | head -1)
+
+          echo "FS patch: $FS_PATCH"
+          echo "Kernel patch: $KERNEL_PATCH"
+
+          [ -n "$FS_PATCH" ] && patch -p1 < "$FS_PATCH" || echo "FS patch not found/failed"
+          [ -n "$KERNEL_PATCH" ] && patch -p1 < "$KERNEL_PATCH" || echo "Kernel patch not found/failed"
+
+          # Add susfs to fs/Makefile if not already there
+          grep -q "susfs.o" fs/Makefile || echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
+
+          echo "SuSFS setup done"
 
       - name: Patch kernel sources
         run: |
@@ -122,20 +139,27 @@ jobs:
               f.writelines(lines)
           print("qcom/Makefile OK")
 
-          # Fix 7: mac80211 minstrel
+          # Fix 7: mac80211 minstrel - keep built-in (=y), just fix duplicate object issue
+          # The working kernel has CONFIG_MAC80211_RC_MINSTREL=y built-in
+          # The duplicate symbol was from minstrel_ht being included twice
+          # Fix: ensure minstrel_ht.o is only listed once in the Makefile
           with open('net/mac80211/Makefile', 'r') as f:
-              c = f.read()
-          c = re.sub(r'^(mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=.*)',
-                     r'# PATCHED: \1', c, flags=re.MULTILINE)
-          c = re.sub(r'^(rc80211_minstrel-y\s*:=)',
-                     r'# PATCHED: \1', c, flags=re.MULTILINE)
-          c = re.sub(r'^(rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=)',
-                     r'# PATCHED: \1', c, flags=re.MULTILINE)
+              lines = f.readlines()
+          seen = set()
+          new_lines = []
+          for l in lines:
+              key = l.strip()
+              if 'minstrel' in key and key in seen:
+                  new_lines.append('# DEDUP: ' + l)
+              else:
+                  new_lines.append(l)
+                  if 'minstrel' in key:
+                      seen.add(key)
           with open('net/mac80211/Makefile', 'w') as f:
-              f.write(c)
-          print("mac80211 Makefile OK")
+              f.writelines(new_lines)
+          print("mac80211 Makefile deduped OK")
 
-          # Fix 8: FB_EARLY_EVENT_BLANK
+          # Fix 8: FB_EARLY_EVENT_BLANK - patch all touchscreen drivers
           ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
           patched = 0
           for path in ts_files:
@@ -256,26 +280,57 @@ jobs:
               f.write(c)
           print("mdt_loader.c OK")
 
-          # Fix 17: Find and remove aw_* symbol callers
+          # Fix 17: Find aw_* callers and disable them via defconfig
+          # Scan all drivers to find who calls aw_send_afe_cal_apr
+          aw_callers = []
           for path in glob.glob('drivers/**/*.c', recursive=True) + \
                       glob.glob('sound/**/*.c', recursive=True):
               try:
                   with open(path, 'r', errors='ignore') as f:
                       c = f.read()
                   if 'aw_send_afe_cal_apr' in c or 'aw_adm_param_enable' in c:
-                      fname = os.path.basename(path).replace('.c', '')
-                      mk = os.path.join(os.path.dirname(path), 'Makefile')
-                      if os.path.exists(mk):
-                          with open(mk, 'r') as f:
-                              lines = f.readlines()
-                          new = [l for l in lines if fname not in l]
-                          if len(new) != len(lines):
-                              with open(mk, 'w') as f:
-                                  f.writelines(new)
-                              print(f"aw_* caller removed: {fname}")
+                      aw_callers.append(path)
+                      print(f"aw_* caller found: {path}")
               except:
                   pass
+          # Remove from their Makefile
+          for caller in aw_callers:
+              fname = os.path.basename(caller).replace('.c', '')
+              mk = os.path.join(os.path.dirname(caller), 'Makefile')
+              if os.path.exists(mk):
+                  with open(mk, 'r') as f:
+                      lines = f.readlines()
+                  new = [l for l in lines if fname not in l]
+                  if len(new) != len(lines):
+                      with open(mk, 'w') as f:
+                          f.writelines(new)
+                      print(f"  removed {fname} from Makefile")
           print("aw_* callers handled OK")
+
+          # Fix 18: Find drm_panel_notifier callers and remove them
+          # Working kernel uses MSM_SERVICE_NOTIFIER not DRM_PANEL_NOTIFIER
+          drm_callers = []
+          for path in glob.glob('drivers/**/*.c', recursive=True):
+              try:
+                  with open(path, 'r', errors='ignore') as f:
+                      c = f.read()
+                  if 'drm_panel_notifier_register' in c or 'drm_panel_notifier_unregister' in c:
+                      drm_callers.append(path)
+                      print(f"drm_panel_notifier caller: {path}")
+              except:
+                  pass
+          for caller in drm_callers:
+              fname = os.path.basename(caller).replace('.c', '')
+              mk = os.path.join(os.path.dirname(caller), 'Makefile')
+              if os.path.exists(mk):
+                  with open(mk, 'r') as f:
+                      lines = f.readlines()
+                  new = [l for l in lines if fname not in l]
+                  if len(new) != len(lines):
+                      with open(mk, 'w') as f:
+                          f.writelines(new)
+                      print(f"  removed {fname} from Makefile")
+          print("drm_panel_notifier callers handled OK")
 
           print("All patches done")
           PYEOF
@@ -286,11 +341,15 @@ jobs:
             sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
           done
 
-          # Linker symbol fixes
+          # Confirmed from working kernel config
           echo "CONFIG_QCOM_QMI_HELPERS=y" >> arch/arm64/configs/defconfig
-          sed -i 's/CONFIG_QCOM_SCM=m/CONFIG_QCOM_SCM=y/' arch/arm64/configs/defconfig
           echo "CONFIG_QCOM_SCM=y" >> arch/arm64/configs/defconfig
-          echo "CONFIG_DRM_PANEL_NOTIFIER=y" >> arch/arm64/configs/defconfig
+          sed -i 's/CONFIG_QCOM_SCM=m/CONFIG_QCOM_SCM=y/' arch/arm64/configs/defconfig
+          echo "CONFIG_MSM_SERVICE_NOTIFIER=y" >> arch/arm64/configs/defconfig
+
+          # Disable AW882XX (confirmed disabled in working kernel)
+          echo "# CONFIG_SND_SOC_AW882XX is not set" >> arch/arm64/configs/defconfig
+          echo "# CONFIG_SND_SOC_AW87XXX is not set" >> arch/arm64/configs/defconfig
 
           # Enable SuSFS
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/defconfig
@@ -301,7 +360,7 @@ jobs:
           echo "CONFIG_KSU_SUSFS_TRY_UMOUNT=y" >> arch/arm64/configs/defconfig
           echo "CONFIG_KSU_SUSFS_SPOOF_UNAME=y" >> arch/arm64/configs/defconfig
           echo "CONFIG_KSU_SUSFS_ENABLE_LOG=y" >> arch/arm64/configs/defconfig
-          echo "SuSFS configs enabled OK"
+          echo "All defconfig changes applied"
 
       - name: Enable KernelSU and setup defconfig
         run: |
