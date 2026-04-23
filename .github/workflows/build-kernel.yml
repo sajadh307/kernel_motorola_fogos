@@ -38,22 +38,15 @@ jobs:
 
       - name: Setup SuSFS files
         run: |
-          # Clone to get the source files only - DO NOT apply patches
-          # The kernel source already has SuSFS patches applied
           git clone https://gitlab.com/simonpunk/susfs4ksu.git -b kernel-5.4 susfs4ksu
-
-          # Copy only the C/H files - not applying patches
           cp susfs4ksu/kernel_patches/fs/susfs.c fs/
           cp susfs4ksu/kernel_patches/fs/sus_su.c fs/ 2>/dev/null || true
           cp susfs4ksu/kernel_patches/include/linux/susfs.h include/linux/
           cp susfs4ksu/kernel_patches/include/linux/susfs_def.h include/linux/ 2>/dev/null || true
           cp susfs4ksu/kernel_patches/include/linux/sus_su.h include/linux/ 2>/dev/null || true
-
-          # Add to fs/Makefile if not already there
           grep -q "susfs.o" fs/Makefile || echo 'obj-$(CONFIG_KSU_SUSFS) += susfs.o' >> fs/Makefile
           grep -q "sus_su.o" fs/Makefile || echo 'obj-$(CONFIG_KSU_SUSFS_SUS_SU) += sus_su.o' >> fs/Makefile
-
-          echo "SuSFS files copied OK (no patches applied - already in source)"
+          echo "SuSFS files copied OK"
 
       - name: Patch kernel sources
         run: |
@@ -127,64 +120,25 @@ jobs:
               f.writelines(lines)
           print("qcom/Makefile OK")
 
-          # Fix 7: mac80211 minstrel duplicate - remove the extra obj-y line
-          # The rc80211_minstrel_ht.o is compiled twice because it's in
-          # rc80211_minstrel-y AND directly in mac80211-y
+          # Fix 7: mac80211 minstrel duplicate symbols
+          # rc80211_minstrel_ht.o is compiled twice - remove from rc80211_minstrel-y list
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          print("mac80211 Makefile minstrel lines:")
-          for l in c.split('\n'):
-              if 'minstrel' in l:
-                  print(f"  {repr(l)}")
-          # Remove the standalone rc80211_minstrel_ht.o if it exists outside the list
-          c = re.sub(r'^mac80211-y\s*\+=\s*rc80211_minstrel_ht\.o\s*$', '', c, flags=re.MULTILINE)
-          c = re.sub(r'^mac80211-y\s*\+=\s*rc80211_minstrel\.o\s*$', '', c, flags=re.MULTILINE)
+          # Remove rc80211_minstrel_ht.o from the rc80211_minstrel-y list
+          # It appears as:  \trc80211_minstrel_ht.o  (last item, no backslash)
+          # or:             \trc80211_minstrel_ht.o \  (with backslash continuation)
+          c = re.sub(r'\trc80211_minstrel_ht\.o\s*\\\n', '', c)
+          c = re.sub(r'\\\n\trc80211_minstrel_ht\.o\n', '\n', c)
+          c = re.sub(r'\trc80211_minstrel_ht\.o\n', '', c)
           with open('net/mac80211/Makefile', 'w') as f:
               f.write(c)
-          print("mac80211 Makefile OK")
+          # Verify
+          with open('net/mac80211/Makefile', 'r') as f:
+              verify = f.read()
+          count = verify.count('rc80211_minstrel_ht')
+          print(f"mac80211 Makefile OK - rc80211_minstrel_ht appears {count} times")
 
-          # Fix 8: namei.c - SuSFS partial patch left 'retval' undeclared at line ~2890
-          with open('fs/namei.c', 'r') as f:
-              lines = f.readlines()
-          print(f"namei.c lines 2880-2900:")
-          for i, l in enumerate(lines[2879:2900], 2880):
-              print(f"  {i}: {l.rstrip()}")
-          PYEOF
-
-          # Fix 8 continued: show exact context then fix
-          python3 << 'PYEOF2'
-          import re
-
-          with open('fs/namei.c', 'r') as f:
-              c = f.read()
-
-          # The issue: SuSFS partial patch inserted susfs code that references 'retval'
-          # but the variable isn't declared in that scope
-          # Find and fix the broken susfs block in namei.c
-          lines = c.split('\n')
-          fixed = []
-          i = 0
-          while i < len(lines):
-              line = lines[i]
-              # Look for susfs code referencing retval where it shouldn't be
-              if 'susfs' in line.lower() and 'retval' in line and i > 2800:
-                  # Check if 'retval' is declared in surrounding context
-                  context = '\n'.join(lines[max(0,i-30):i])
-                  if 'retval' not in context or 'int retval' not in context:
-                      print(f"Fixing line {i+1}: {line.rstrip()}")
-                      # Replace retval reference with 0 or skip
-                      line = re.sub(r'\bretval\b', '0', line)
-              fixed.append(line)
-              i += 1
-          with open('fs/namei.c', 'w') as f:
-              f.write('\n'.join(fixed))
-          print("namei.c retval fix applied OK")
-          PYEOF2
-
-          python3 << 'PYEOF3'
-          import re, os, glob
-
-          # Fix 9: FB_EARLY_EVENT_BLANK
+          # Fix 8: FB_EARLY_EVENT_BLANK
           ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
           patched = 0
           for path in ts_files:
@@ -197,7 +151,7 @@ jobs:
                   patched += 1
           print(f"FB_EARLY_EVENT_BLANK fix applied to {patched} files OK")
 
-          # Fix 10: i2c-qcom-geni.c
+          # Fix 9: i2c-qcom-geni.c
           with open('drivers/i2c/busses/i2c-qcom-geni.c', 'r') as f:
               lines = f.readlines()
           last_include = max((i for i, l in enumerate(lines) if l.strip().startswith('#include')), default=0)
@@ -212,7 +166,7 @@ jobs:
               f.write(full)
           print("i2c-qcom-geni.c OK")
 
-          # Fix 11: flask.h
+          # Fix 10: flask.h
           flask_path = 'security/selinux/include/flask.h'
           if not os.path.exists(flask_path):
               with open(flask_path, 'w') as f:
@@ -222,7 +176,7 @@ jobs:
                           "#define SECINITSID_UNLABELED 3\n#define SECINITSID_NUM 27\n#endif\n")
           print("flask.h OK")
 
-          # Fix 12: sidtab.h
+          # Fix 11: sidtab.h
           sidtab_path = 'security/selinux/ss/sidtab.h'
           if os.path.exists(sidtab_path):
               with open(sidtab_path, 'r') as f:
@@ -237,7 +191,7 @@ jobs:
                       f.write('\n'.join(lines))
           print("sidtab.h OK")
 
-          # Fix 13: av_permissions.h
+          # Fix 12: av_permissions.h
           av_perm_path = 'security/selinux/include/av_permissions.h'
           if not os.path.exists(av_perm_path):
               with open(av_perm_path, 'w') as f:
@@ -249,7 +203,7 @@ jobs:
                           '#define SECURITY__SETENFORCE 0x00000080UL\n#endif\n')
           print("av_permissions.h OK")
 
-          # Fix 14: Remove broken Motorola drivers
+          # Fix 13: Remove broken Motorola drivers
           with open('drivers/Makefile', 'r') as f:
               lines = f.readlines()
           lines = [l for l in lines if 'moto_mm' not in l and 'moto_swap' not in l]
@@ -257,7 +211,7 @@ jobs:
               f.writelines(lines)
           print("drivers/Makefile moto removed OK")
 
-          # Fix 15: mmi-smbcharger-iio
+          # Fix 14: mmi-smbcharger-iio
           power_mk = 'drivers/power/Makefile'
           if os.path.exists(power_mk):
               with open(power_mk, 'r') as f:
@@ -267,7 +221,7 @@ jobs:
                   f.writelines(lines)
               print("power/Makefile mmi-smbcharger removed OK")
 
-          # Fix 16: stmmac
+          # Fix 15: stmmac
           stmicro_mk = 'drivers/net/ethernet/stmicro/Makefile'
           if os.path.exists(stmicro_mk):
               with open(stmicro_mk, 'r') as f:
@@ -277,7 +231,7 @@ jobs:
                   f.writelines(lines)
               print("stmicro stmmac removed OK")
 
-          # Fix 17: mdt_loader.c
+          # Fix 16: mdt_loader.c
           mdt_path = 'drivers/soc/qcom/mdt_loader.c'
           with open(mdt_path, 'r') as f:
               c = f.read()
@@ -289,7 +243,7 @@ jobs:
               f.write(c)
           print("mdt_loader.c OK")
 
-          # Fix 18: aw_* callers - remove from Makefile
+          # Fix 17: aw_* callers
           for path in glob.glob('drivers/**/*.c', recursive=True) + \
                       glob.glob('sound/**/*.c', recursive=True):
               try:
@@ -310,7 +264,7 @@ jobs:
                   pass
           print("aw_* OK")
 
-          # Fix 19: drm_panel_notifier callers - remove from Makefile
+          # Fix 18: drm_panel_notifier callers
           for path in glob.glob('drivers/**/*.c', recursive=True):
               try:
                   with open(path, 'r', errors='ignore') as f:
@@ -331,7 +285,7 @@ jobs:
           print("drm_panel_notifier OK")
 
           print("All patches done")
-          PYEOF3
+          PYEOF
 
           # Disable NFS
           for cfg in CONFIG_NFS_FS CONFIG_NFS_V2 CONFIG_NFS_V3 CONFIG_NFS_V4; do
@@ -339,15 +293,12 @@ jobs:
             sed -i "s/${cfg}=m/# ${cfg} is not set/" arch/arm64/configs/defconfig
           done
 
-          # Confirmed from working kernel config
           echo "CONFIG_QCOM_QMI_HELPERS=y" >> arch/arm64/configs/defconfig
           echo "CONFIG_QCOM_SCM=y" >> arch/arm64/configs/defconfig
           sed -i 's/CONFIG_QCOM_SCM=m/CONFIG_QCOM_SCM=y/' arch/arm64/configs/defconfig
           echo "CONFIG_MSM_SERVICE_NOTIFIER=y" >> arch/arm64/configs/defconfig
           echo "# CONFIG_SND_SOC_AW882XX is not set" >> arch/arm64/configs/defconfig
           echo "# CONFIG_SND_SOC_AW87XXX is not set" >> arch/arm64/configs/defconfig
-
-          # SuSFS configs
           echo "CONFIG_KSU_SUSFS=y" >> arch/arm64/configs/defconfig
           echo "CONFIG_KSU_SUSFS_SUS_PATH=y" >> arch/arm64/configs/defconfig
           echo "CONFIG_KSU_SUSFS_SUS_MOUNT=y" >> arch/arm64/configs/defconfig
