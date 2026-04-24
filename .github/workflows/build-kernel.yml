@@ -121,22 +121,37 @@ jobs:
           print("qcom/Makefile OK")
 
           # Fix 7: mac80211 minstrel duplicate symbols
-          # rc80211_minstrel_ht.o is compiled twice - remove from rc80211_minstrel-y list
+          # Root cause: rc80211_minstrel_ht.o compiled twice
+          # Fix: remove the entire rc80211_minstrel-y block and obj-y line,
+          # then add all minstrel files directly to mac80211-y exactly once
           with open('net/mac80211/Makefile', 'r') as f:
               c = f.read()
-          # Remove rc80211_minstrel_ht.o from the rc80211_minstrel-y list
-          # It appears as:  \trc80211_minstrel_ht.o  (last item, no backslash)
-          # or:             \trc80211_minstrel_ht.o \  (with backslash continuation)
-          c = re.sub(r'\trc80211_minstrel_ht\.o\s*\\\n', '', c)
-          c = re.sub(r'\\\n\trc80211_minstrel_ht\.o\n', '\n', c)
-          c = re.sub(r'\trc80211_minstrel_ht\.o\n', '', c)
+          # Remove rc80211_minstrel-y variable definition (multiline)
+          c = re.sub(
+              r'rc80211_minstrel-y\s*:=.*?(?=\n\S|\n\n|\Z)',
+              '',
+              c, flags=re.DOTALL)
+          # Remove obj-y line for rc80211_minstrel module
+          c = re.sub(
+              r'obj-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=\s*rc80211_minstrel\.o\s*\n',
+              '', c)
+          # Remove mac80211-y += $(rc80211_minstrel-y) line
+          c = re.sub(
+              r'mac80211-\$\(CONFIG_MAC80211_RC_MINSTREL\)\s*\+=\s*\$\(rc80211_minstrel-y\)\s*\n',
+              '', c)
+          # Remove any debugfs reference to rc80211_minstrel-y
+          c = re.sub(
+              r'rc80211_minstrel-\$\(CONFIG_MAC80211_DEBUGFS\)\s*\+=.*\n',
+              '', c)
+          # Now add them back cleanly and exactly once
+          c += '\n# minstrel - added directly to avoid duplicate symbol\n'
+          c += 'mac80211-$(CONFIG_MAC80211_RC_MINSTREL) += rc80211_minstrel.o rc80211_minstrel_ht.o\n'
+          c += 'mac80211-$(CONFIG_MAC80211_DEBUGFS) += rc80211_minstrel_debugfs.o rc80211_minstrel_ht_debugfs.o\n'
           with open('net/mac80211/Makefile', 'w') as f:
               f.write(c)
           # Verify
-          with open('net/mac80211/Makefile', 'r') as f:
-              verify = f.read()
-          count = verify.count('rc80211_minstrel_ht')
-          print(f"mac80211 Makefile OK - rc80211_minstrel_ht appears {count} times")
+          minstrel_count = c.count('rc80211_minstrel_ht.o')
+          print(f"mac80211 Makefile OK - rc80211_minstrel_ht.o appears {minstrel_count} time(s)")
 
           # Fix 8: FB_EARLY_EVENT_BLANK
           ts_files = glob.glob('drivers/input/touchscreen/**/*.c', recursive=True)
